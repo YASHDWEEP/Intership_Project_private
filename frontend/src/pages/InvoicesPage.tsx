@@ -74,12 +74,17 @@ export const InvoicesPage: React.FC = () => {
     }
   };
 
+  const [sendingEmailId, setSendingEmailId] = useState<string | null>(null);
+
   const handleSendEmail = async (invoiceId: string, invoiceNumber: string) => {
+    setSendingEmailId(invoiceId);
     try {
       const res = await api.post(`/invoices/${invoiceId}/send-email`);
       alert(res.data?.message || `Invoice PDF email sent successfully for ${invoiceNumber}!`);
     } catch (err: any) {
       alert(err.response?.data?.error || 'Failed to send invoice email');
+    } finally {
+      setSendingEmailId(null);
     }
   };
 
@@ -254,11 +259,21 @@ export const InvoicesPage: React.FC = () => {
 
                       <button
                         onClick={() => handleSendEmail(inv.id, inv.invoiceNumber)}
-                        className="px-2 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg font-semibold text-[11px] border border-indigo-200 transition-colors inline-flex items-center gap-1"
+                        disabled={sendingEmailId === inv.id}
+                        className="px-2 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg font-semibold text-[11px] border border-indigo-200 transition-colors inline-flex items-center gap-1 disabled:opacity-50"
                         title="Email PDF Invoice to Client"
                       >
-                        <Send className="w-3.5 h-3.5" />
-                        Email
+                        {sendingEmailId === inv.id ? (
+                          <>
+                            <div className="w-3 h-3 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
+                            <span>Sending...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Send className="w-3.5 h-3.5" />
+                            <span>Email</span>
+                          </>
+                        )}
                       </button>
 
                       {inv.status === 'PAID' && (

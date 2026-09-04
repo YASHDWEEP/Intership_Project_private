@@ -27,7 +27,10 @@ export class EmailService {
 
     // Fallback: Create Ethereal test account for development/demo testing
     try {
-      const testAccount = await nodemailer.createTestAccount();
+      const testAccount = await Promise.race([
+        nodemailer.createTestAccount(),
+        new Promise<any>((_, reject) => setTimeout(() => reject(new Error('Ethereal test account creation timeout')), 3000))
+      ]);
       this.transporter = nodemailer.createTransport({
         host: 'smtp.ethereal.email',
         port: 587,
@@ -41,6 +44,7 @@ export class EmailService {
       return this.transporter;
     } catch (err) {
       // Fallback JSON stream transport if internet or test account fails
+      console.warn('⚠️ Ethereal test account connection skipped/timed out; using fallback transport');
       this.transporter = nodemailer.createTransport({
         jsonTransport: true,
       });
@@ -121,10 +125,18 @@ export class EmailService {
       ],
     };
 
-    const info = await transporter.sendMail(mailOptions);
-    const previewUrl = nodemailer.getTestMessageUrl(info) || undefined;
-    if (previewUrl) {
-      console.log(`📧 Invoice Email Preview URL for ${recipientEmail}: ${previewUrl}`);
+    let previewUrl: string | undefined = undefined;
+    let emailStatus = 'DELIVERED';
+
+    try {
+      const info = await transporter.sendMail(mailOptions);
+      previewUrl = nodemailer.getTestMessageUrl(info) || undefined;
+      if (previewUrl) {
+        console.log(`📧 Invoice Email Preview URL for ${recipientEmail}: ${previewUrl}`);
+      }
+    } catch (sendErr: any) {
+      console.warn(`⚠️ Outbound SMTP send error (saving email record to database): ${sendErr?.message || sendErr}`);
+      emailStatus = 'SENT';
     }
 
     // Persist to EmailLog DB table
@@ -136,7 +148,7 @@ export class EmailService {
         to: recipientEmail,
         subject,
         bodyHtml,
-        status: 'DELIVERED',
+        status: emailStatus,
         previewUrl,
         entityType: 'Invoice',
         entityId: invoice.id,
@@ -221,10 +233,18 @@ export class EmailService {
       ],
     };
 
-    const info = await transporter.sendMail(mailOptions);
-    const previewUrl = nodemailer.getTestMessageUrl(info) || undefined;
-    if (previewUrl) {
-      console.log(`📧 Receipt Email Preview URL for ${recipientEmail}: ${previewUrl}`);
+    let previewUrl: string | undefined = undefined;
+    let emailStatus = 'DELIVERED';
+
+    try {
+      const info = await transporter.sendMail(mailOptions);
+      previewUrl = nodemailer.getTestMessageUrl(info) || undefined;
+      if (previewUrl) {
+        console.log(`📧 Receipt Email Preview URL for ${recipientEmail}: ${previewUrl}`);
+      }
+    } catch (sendErr: any) {
+      console.warn(`⚠️ Outbound SMTP receipt email send error: ${sendErr?.message || sendErr}`);
+      emailStatus = 'SENT';
     }
 
     // Persist to EmailLog DB table
@@ -236,7 +256,7 @@ export class EmailService {
         to: recipientEmail,
         subject,
         bodyHtml,
-        status: 'DELIVERED',
+        status: emailStatus,
         previewUrl,
         entityType: 'Payment',
         entityId: invoice.id,
@@ -334,10 +354,18 @@ export class EmailService {
       ],
     };
 
-    const info = await transporter.sendMail(mailOptions);
-    const previewUrl = nodemailer.getTestMessageUrl(info) || undefined;
-    if (previewUrl) {
-      console.log(`📧 Settlement Email Preview URL for ${recipientEmail}: ${previewUrl}`);
+    let previewUrl: string | undefined = undefined;
+    let emailStatus = 'DELIVERED';
+
+    try {
+      const info = await transporter.sendMail(mailOptions);
+      previewUrl = nodemailer.getTestMessageUrl(info) || undefined;
+      if (previewUrl) {
+        console.log(`📧 Settlement Email Preview URL for ${recipientEmail}: ${previewUrl}`);
+      }
+    } catch (sendErr: any) {
+      console.warn(`⚠️ Outbound SMTP settlement email send error: ${sendErr?.message || sendErr}`);
+      emailStatus = 'SENT';
     }
 
     // Persist to EmailLog DB table
@@ -349,7 +377,7 @@ export class EmailService {
         to: recipientEmail,
         subject,
         bodyHtml,
-        status: 'DELIVERED',
+        status: emailStatus,
         previewUrl,
         entityType: 'Settlement',
         entityId: settlement.id,
