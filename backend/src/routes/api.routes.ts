@@ -19,6 +19,11 @@ import { authGuard } from '../common/guards/auth.guard';
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 const router = Router();
 
+// Health & Keep-Alive Route
+router.get('/health', (req, res) => {
+  res.json({ status: 'ok', service: 'CABMITRA API', timestamp: new Date(), uptime: process.uptime() });
+});
+
 // Auth Routes
 router.post('/auth/login', AuthController.login);
 router.get('/auth/me', authGuard(), AuthController.getMe);

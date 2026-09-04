@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import api from './services/api';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { Sidebar } from './components/Sidebar';
 import { Header } from './components/Header';
@@ -167,6 +168,19 @@ export const AppRoutes: React.FC = () => {
 };
 
 export const App: React.FC = () => {
+  useEffect(() => {
+    // Non-blocking initial server warmup ping
+    api.get('/health').catch(() => {});
+
+    // Keep-alive heartbeat: Ping /api/health every 3 minutes (180,000ms)
+    // Prevents Render free tier from going to sleep while user has app open
+    const interval = setInterval(() => {
+      api.get('/health').catch(() => {});
+    }, 180000);
+
+    return () => clearInterval(interval);
+  }, []);
+
   return (
     <AuthProvider>
       <Router>

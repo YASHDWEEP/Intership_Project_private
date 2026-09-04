@@ -16,16 +16,39 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
+// Automatic Silent Retry Interceptor for Render Cold Starts & Network Drops
 api.interceptors.response.use(
   (response) => response,
-  (error) => {
-    if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
-      error.response = {
-        data: {
-          error: 'Connection timeout. Render server is waking up from idle. Please try again in 5 seconds!',
-        },
-      };
+  async (error) => {
+    const config = error.config;
+
+    // Initialize retry counter
+    if (config) {
+      config._retryCount = config._retryCount || 0;
     }
+
+    const MAX_RETRIES = 4;
+    const responseStatus = error.response?.status;
+    const isRetryableError =
+      !error.response || // Network connection drop / Server sleeping
+      responseStatus === 502 ||
+      responseStatus === 503 ||
+      responseStatus === 504 ||
+      responseStatus === 500 ||
+      error.code === 'ECONNABORTED' ||
+      error.code === 'ERR_NETWORK' ||
+      error.message?.includes('timeout');
+
+    if (config && isRetryableError && config._retryCount < MAX_RETRIES) {
+      config._retryCount += 1;
+      const delayMs = config._retryCount * 2000; // 2s, 4s, 6s, 8s
+      console.warn(`⏳ Server warming up / network retry ${config._retryCount}/${MAX_RETRIES} in ${delayMs}ms...`);
+      
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+      return api(config);
+    }
+
+    // Standard 401 Unauthorized handling
     if (error.response && error.response.status === 401) {
       localStorage.removeItem('cabmitra_token');
       localStorage.removeItem('cabmitra_user');
@@ -33,6 +56,16 @@ api.interceptors.response.use(
         window.location.href = '/login';
       }
     }
+
+    // Standardize friendly error message if retries were exhausted
+    if (!error.response) {
+      error.response = {
+        data: {
+          error: 'CabMitra backend server is reconnecting. Please try your request again in a few seconds.',
+        },
+      };
+    }
+
     return Promise.reject(error);
   }
 );
