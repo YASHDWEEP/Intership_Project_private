@@ -1,0 +1,336 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String     @id @default(uuid())
+  name         String
+  email        String     @unique
+  passwordHash String
+  role         String     // ADMIN, OPERATIONS, ACCOUNTS, VENDOR, CLIENT
+  status       String     @default("ACTIVE") // ACTIVE, INACTIVE
+  clientId     String?
+  vendorId     String?
+  client       Client?    @relation(fields: [clientId], references: [id])
+  vendor       Vendor?    @relation(fields: [vendorId], references: [id])
+  auditLogs    AuditLog[]
+  importJobs   ImportJob[]
+  notifications Notification[]
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+}
+
+model Client {
+  id            String         @id @default(uuid())
+  name          String
+  gstNumber     String
+  contactPerson String
+  contactEmail  String
+  phone         String
+  billingCycle  String         @default("MONTHLY") // DAILY, WEEKLY, MONTHLY
+  active        Boolean        @default(true)
+  users         User[]
+  trips         Trip[]
+  pricingRules  PricingRule[]
+  importJobs    ImportJob[]
+  importMappings ImportMapping[]
+  invoices      Invoice[]
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+}
+
+model Vendor {
+  id              String       @id @default(uuid())
+  name            String
+  companyName     String
+  gstNumber       String
+  phone           String
+  email           String
+  address         String
+  commissionType  String       @default("PERCENTAGE") // PERCENTAGE, FIXED
+  commissionValue Float        @default(10.0)
+  active          Boolean      @default(true)
+  users           User[]
+  vehicles        Vehicle[]
+  trips           Trip[]
+  settlements     Settlement[]
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+}
+
+model Vehicle {
+  id              String   @id @default(uuid())
+  vendorId        String
+  vendor          Vendor   @relation(fields: [vendorId], references: [id])
+  vehicleNumber   String   @unique
+  vehicleType     String   // 4 Seater, 6 Seater, EV, Sedan, SUV
+  seatingCapacity Int      @default(4)
+  fuelType        String   @default("DIESEL") // DIESEL, PETROL, CNG, ELECTRIC
+  active          Boolean  @default(true)
+  trips           Trip[]
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model Trip {
+  id             String          @id @default(uuid())
+  tripDate       DateTime
+  clientId       String
+  client         Client          @relation(fields: [clientId], references: [id])
+  vendorId       String
+  vendor         Vendor          @relation(fields: [vendorId], references: [id])
+  vehicleId      String?
+  vehicle        Vehicle?        @relation(fields: [vehicleId], references: [id])
+  vehicleNumber  String
+  vehicleType    String
+  employeeCount  Int             @default(1)
+  totalKm        Float
+  tripCategory   String          @default("PICKUP") // PICKUP, DROP, OUTSTATION, RENTAL
+  billCategory   String          @default("REGULAR") // REGULAR, ADHOC, NIGHT
+  kmSlab         String          @default("STANDARD")
+  tripRate       Float           @default(0.0)
+  tripRevenue    Float           @default(0.0)
+  vendorCost     Float           @default(0.0)
+  waitingTime    Float           @default(0.0)
+  tollAmount     Float           @default(0.0)
+  parkingAmount  Float           @default(0.0)
+  status         String          @default("VALIDATED") // DRAFT, VALIDATED, PROCESSED, INVOICED, SETTLED
+  source         String          @default("MANUAL") // MANUAL, EXCEL_IMPORT
+  importJobId    String?
+  importJob      ImportJob?      @relation(fields: [importJobId], references: [id])
+  invoiceId      String?
+  invoice        Invoice?        @relation(fields: [invoiceId], references: [id])
+  settlementId   String?
+  settlement     Settlement?     @relation(fields: [settlementId], references: [id])
+  invoiceItems   InvoiceItem[]
+  settlementItems SettlementItem[]
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  @@index([tripDate])
+  @@index([clientId])
+  @@index([vendorId])
+  @@index([vehicleNumber])
+  @@index([status])
+}
+
+model PricingRule {
+  id            String        @id @default(uuid())
+  clientId      String
+  client        Client        @relation(fields: [clientId], references: [id])
+  vehicleType   String
+  ruleName      String
+  pricingType   String        @default("KM_SLAB") // KM_SLAB, FLAT, PER_KM
+  minimumKm     Float         @default(0.0)
+  maximumKm     Float         @default(999.0)
+  rate          Float         @default(0.0)
+  effectiveFrom DateTime      @default(now())
+  effectiveTo   DateTime?
+  active        Boolean       @default(true)
+  slabs         PricingSlab[]
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+}
+
+model PricingSlab {
+  id            String      @id @default(uuid())
+  pricingRuleId String
+  pricingRule   PricingRule @relation(fields: [pricingRuleId], references: [id], onDelete: Cascade)
+  minKm         Float
+  maxKm         Float
+  rate          Float
+  vendorRate    Float       @default(0.0)
+}
+
+model ImportJob {
+  id            String        @id @default(uuid())
+  clientId      String
+  client        Client        @relation(fields: [clientId], references: [id])
+  fileName      String
+  fileType      String
+  status        String        @default("PENDING") // PENDING, PROCESSING, COMPLETED, FAILED
+  totalRows     Int           @default(0)
+  validRows     Int           @default(0)
+  invalidRows   Int           @default(0)
+  duplicateRows Int           @default(0)
+  createdBy     String
+  user          User          @relation(fields: [createdBy], references: [id])
+  trips         Trip[]
+  errors        ImportError[]
+  createdAt     DateTime      @default(now())
+  completedAt   DateTime?
+}
+
+model ImportMapping {
+  id            String   @id @default(uuid())
+  clientId      String
+  client        Client   @relation(fields: [clientId], references: [id])
+  templateName  String
+  sourceColumn  String
+  internalField String
+  createdAt     DateTime @default(now())
+
+  @@unique([clientId, sourceColumn])
+}
+
+model ImportError {
+  id          String    @id @default(uuid())
+  importJobId String
+  importJob   ImportJob @relation(fields: [importJobId], references: [id], onDelete: Cascade)
+  rowNumber   Int
+  field       String
+  errorMessage String
+  rawValue    String?
+}
+
+model Invoice {
+  id                 String        @id @default(uuid())
+  invoiceNumber      String        @unique
+  clientId           String
+  client             Client        @relation(fields: [clientId], references: [id])
+  billingPeriodStart DateTime
+  billingPeriodEnd   DateTime
+  subtotal           Float         @default(0.0)
+  taxAmount          Float         @default(0.0)
+  totalAmount        Float         @default(0.0)
+  status             String        @default("GENERATED") // DRAFT, GENERATED, SENT, PENDING, PAID, OVERDUE, FAILED, REFUNDED
+  pdfUrl             String?
+  generatedAt        DateTime      @default(now())
+  dueDate            DateTime
+  items              InvoiceItem[]
+  trips              Trip[]
+  payments           Payment[]
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+}
+
+model InvoiceItem {
+  id          String   @id @default(uuid())
+  invoiceId   String
+  invoice     Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  tripId      String?
+  trip        Trip?    @relation(fields: [tripId], references: [id])
+  description String
+  quantity    Int      @default(1)
+  rate        Float
+  amount      Float
+}
+
+model Settlement {
+  id                    String           @id @default(uuid())
+  vendorId              String
+  vendor                Vendor           @relation(fields: [vendorId], references: [id])
+  settlementPeriodStart DateTime
+  settlementPeriodEnd   DateTime
+  totalTrips            Int              @default(0)
+  grossAmount           Float            @default(0.0)
+  deductions            Float            @default(0.0)
+  netPayable            Float            @default(0.0)
+  status                String           @default("CALCULATED") // DRAFT, CALCULATED, APPROVED, PAID
+  paidAt                DateTime?
+  items                 SettlementItem[]
+  payments              Payment[]
+  deductionRecords      Deduction[]
+  trips                 Trip[]
+  createdAt             DateTime         @default(now())
+  updatedAt             DateTime         @updatedAt
+}
+
+model SettlementItem {
+  id            String     @id @default(uuid())
+  settlementId  String
+  settlement    Settlement @relation(fields: [settlementId], references: [id], onDelete: Cascade)
+  tripId        String?
+  trip          Trip?      @relation(fields: [tripId], references: [id])
+  slab          String
+  tripAmount    Float
+  deduction     Float      @default(0.0)
+  payableAmount Float
+}
+
+model Payment {
+  id                String      @id @default(uuid())
+  invoiceId         String?
+  invoice           Invoice?    @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  settlementId      String?
+  settlement        Settlement? @relation(fields: [settlementId], references: [id], onDelete: Cascade)
+  razorpayOrderId   String?
+  razorpayPaymentId String?
+  razorpaySignature String?
+  razorpayQrCodeId  String?
+  amount            Float
+  currency          String      @default("INR")
+  status            String      @default("CREATED") // CREATED, PENDING, AUTHORIZED, CAPTURED, FAILED, REFUNDED
+  method            String?     // upi, card, netbanking, wallet
+  email             String?
+  contact           String?
+  paidAt            DateTime?
+  failureReason     String?
+  paymentDate       DateTime    @default(now())
+  paymentMethod     String      @default("RAZORPAY")
+  referenceNumber   String?
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @default(now()) @updatedAt
+
+  @@index([invoiceId])
+  @@index([razorpayOrderId])
+  @@index([razorpayPaymentId])
+  @@index([status])
+}
+
+model Deduction {
+  id           String     @id @default(uuid())
+  settlementId String
+  settlement   Settlement @relation(fields: [settlementId], references: [id], onDelete: Cascade)
+  type         String     // PENALTY, ADVANCE, SERVICE_CHARGE, DAMAGE
+  amount       Float
+  reason       String
+  createdAt    DateTime   @default(now())
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id])
+  action    String   // CREATE, UPDATE, DELETE, IMPORT, GENERATE_INVOICE, APPROVE_SETTLEMENT, PAY
+  entity    String   // Trip, Invoice, Settlement, Client, Vendor, Vehicle, PricingRule
+  entityId  String
+  oldValue  String?  // JSON string
+  newValue  String?  // JSON string
+  timestamp DateTime @default(now())
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  title     String
+  message   String
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+}
+
+model EmailLog {
+  id          String   @id @default(uuid())
+  type        String   // TAX_INVOICE, PAYMENT_RECEIPT, VENDOR_SETTLEMENT, CUSTOM_MAIL, INBOUND_QUERY
+  direction   String   @default("OUTBOUND") // OUTBOUND, INBOUND
+  from        String
+  to          String
+  subject     String
+  bodyHtml    String
+  status      String   @default("DELIVERED") // SENT, DELIVERED, FAILED
+  previewUrl  String?
+  entityType  String?  // Invoice, Settlement, Payment
+  entityId    String?
+  attachment  String?
+  sentAt      DateTime @default(now())
+
+  @@index([to])
+  @@index([type])
+  @@index([direction])
+}

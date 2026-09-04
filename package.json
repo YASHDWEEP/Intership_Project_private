@@ -1,0 +1,16 @@
+{
+  "name": "cabmitra-root",
+  "version": "1.0.0",
+  "private": true,
+  "description": "CABMITRA - Cab Operations, Corporate Billing & Vendor Settlement Management Platform",
+  "workspaces": [
+    "backend",
+    "frontend"
+  ],
+  "scripts": {
+    "dev": "npm --prefix frontend run dev",
+    "dev:frontend": "npm --prefix frontend run dev",
+    "dev:backend": "npm --prefix backend run dev",
+    "build": "npm --prefix backend run build && npm --prefix frontend run build"
+  }
+}

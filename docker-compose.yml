@@ -1,0 +1,52 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: cabmitra_postgres
+    environment:
+      POSTGRES_USER: cabmitra
+      POSTGRES_PASSWORD: cabmitra_password_2026
+      POSTGRES_DB: cabmitra_db
+    ports:
+      - '5432:5432'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: always
+
+  redis:
+    image: redis:alpine
+    container_name: cabmitra_redis
+    ports:
+      - '6379:6379'
+    restart: always
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: cabmitra_backend
+    ports:
+      - '5000:5000'
+    environment:
+      DATABASE_URL: 'postgresql://cabmitra:cabmitra_password_2026@postgres:5432/cabmitra_db?schema=public'
+      JWT_SECRET: 'cabmitra_super_secret_jwt_key_2026'
+      PORT: 5000
+    depends_on:
+      - postgres
+      - redis
+    restart: always
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: cabmitra_frontend
+    ports:
+      - '3000:80'
+    depends_on:
+      - backend
+    restart: always
+
+volumes:
+  postgres_data:
