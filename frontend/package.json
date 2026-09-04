@@ -19,7 +19,8 @@
     "react-router-dom": "^6.24.0",
     "recharts": "^2.12.7",
     "tailwind-merge": "^2.3.0",
-    "xlsx": "^0.18.5"
+    "xlsx": "^0.18.5",
+    "@rollup/rollup-linux-x64-gnu": "^4.63.1"
   },
   "devDependencies": {
     "@types/papaparse": "^5.3.14",
