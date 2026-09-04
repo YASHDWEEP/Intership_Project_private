@@ -97,48 +97,55 @@ export class InvoicesController {
 
       const generatedDueDate = dueDate ? new Date(dueDate) : new Date(Date.now() + 15 * 24 * 60 * 60 * 1000);
 
-      // Execute in Transaction
-      const invoice = await prisma.$transaction(async (tx) => {
-        const inv = await tx.invoice.create({
-          data: {
-            invoiceNumber,
-            clientId,
-            billingPeriodStart: new Date(startDate),
-            billingPeriodEnd: new Date(endDate),
-            subtotal,
-            taxAmount,
-            totalAmount,
-            status: 'GENERATED',
-            dueDate: generatedDueDate,
-          },
-        });
-
-        // Create line items
-        for (const [description, data] of Object.entries(itemGroups)) {
-          await tx.invoiceItem.create({
+      // Execute in Transaction with 30s timeout
+      const invoice = await prisma.$transaction(
+        async (tx) => {
+          const inv = await tx.invoice.create({
             data: {
-              invoiceId: inv.id,
-              description: `${description} Cab Operations`,
-              quantity: data.count,
-              rate: Math.round((data.totalRevenue / data.count) * 100) / 100,
-              amount: data.totalRevenue,
+              invoiceNumber,
+              clientId,
+              billingPeriodStart: new Date(startDate),
+              billingPeriodEnd: new Date(endDate),
+              subtotal,
+              taxAmount,
+              totalAmount,
+              status: 'GENERATED',
+              dueDate: generatedDueDate,
             },
           });
+
+          // Bulk Create line items
+          const itemEntries = Object.entries(itemGroups);
+          if (itemEntries.length > 0) {
+            await tx.invoiceItem.createMany({
+              data: itemEntries.map(([description, data]) => ({
+                invoiceId: inv.id,
+                description: `${description} Cab Operations`,
+                quantity: data.count,
+                rate: Math.round((data.totalRevenue / data.count) * 100) / 100,
+                amount: data.totalRevenue,
+              })),
+            });
+          }
+
+          // Link trips to invoice
+          await tx.trip.updateMany({
+            where: {
+              id: { in: trips.map((t) => t.id) },
+            },
+            data: {
+              invoiceId: inv.id,
+              status: 'INVOICED',
+            },
+          });
+
+          return inv;
+        },
+        {
+          maxWait: 10000,
+          timeout: 30000,
         }
-
-        // Link trips to invoice
-        await tx.trip.updateMany({
-          where: {
-            id: { in: trips.map((t) => t.id) },
-          },
-          data: {
-            invoiceId: inv.id,
-            status: 'INVOICED',
-          },
-        });
-
-        return inv;
-      });
+      );
 
       await logAudit({
         userId: req.user?.id,

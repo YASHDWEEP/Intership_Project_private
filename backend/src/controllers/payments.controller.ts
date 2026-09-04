@@ -218,41 +218,47 @@ export class PaymentsController {
 
       const paidAt = new Date();
 
-      await prisma.$transaction(async (tx) => {
-        if (paymentRecord) {
-          await tx.payment.update({
-            where: { id: paymentRecord.id },
-            data: {
-              razorpayPaymentId,
-              razorpaySignature: razorpaySignature || 'TEST_VERIFIED',
-              status: 'CAPTURED',
-              method: paymentMethod,
-              email: rzpEmail || paymentRecord.email,
-              contact: rzpContact || paymentRecord.contact,
-              paidAt,
-              referenceNumber: razorpayPaymentId,
-            },
-          });
-        } else {
-          const inv = await tx.invoice.findUnique({ where: { id: invoiceId } });
-          await tx.payment.create({
-            data: {
-              invoiceId,
-              razorpayOrderId,
-              razorpayPaymentId,
-              razorpaySignature: razorpaySignature || 'TEST_VERIFIED',
-              amount: inv?.totalAmount || 0,
-              currency: 'INR',
-              status: 'CAPTURED',
-              method: paymentMethod,
-              paidAt,
-              referenceNumber: razorpayPaymentId,
-            },
-          });
-        }
+      await prisma.$transaction(
+        async (tx) => {
+          if (paymentRecord) {
+            await tx.payment.update({
+              where: { id: paymentRecord.id },
+              data: {
+                razorpayPaymentId,
+                razorpaySignature: razorpaySignature || 'TEST_VERIFIED',
+                status: 'CAPTURED',
+                method: paymentMethod,
+                email: rzpEmail || paymentRecord.email,
+                contact: rzpContact || paymentRecord.contact,
+                paidAt,
+                referenceNumber: razorpayPaymentId,
+              },
+            });
+          } else {
+            const inv = await tx.invoice.findUnique({ where: { id: invoiceId } });
+            await tx.payment.create({
+              data: {
+                invoiceId,
+                razorpayOrderId,
+                razorpayPaymentId,
+                razorpaySignature: razorpaySignature || 'TEST_VERIFIED',
+                amount: inv?.totalAmount || 0,
+                currency: 'INR',
+                status: 'CAPTURED',
+                method: paymentMethod,
+                paidAt,
+                referenceNumber: razorpayPaymentId,
+              },
+            });
+          }
 
-        await PaymentsController.completeInvoiceAndSettlement(tx, invoiceId, razorpayPaymentId, paymentMethod);
-      });
+          await PaymentsController.completeInvoiceAndSettlement(tx, invoiceId, razorpayPaymentId, paymentMethod);
+        },
+        {
+          maxWait: 10000,
+          timeout: 30000,
+        }
+      );
 
       await logAudit({
         userId: req.user?.id,
@@ -327,23 +333,29 @@ export class PaymentsController {
               return res.json({ status: 'ok', message: 'Webhook already processed (Idempotent)' });
             }
 
-            await prisma.$transaction(async (tx) => {
-              await tx.payment.update({
-                where: { id: paymentRecord.id },
-                data: {
-                  status: 'CAPTURED',
-                  razorpayPaymentId: paymentId,
-                  method,
-                  email: email || paymentRecord.email,
-                  contact: contact || paymentRecord.contact,
-                  paidAt: new Date(),
-                },
-              });
+            await prisma.$transaction(
+              async (tx) => {
+                await tx.payment.update({
+                  where: { id: paymentRecord.id },
+                  data: {
+                    status: 'CAPTURED',
+                    razorpayPaymentId: paymentId,
+                    method,
+                    email: email || paymentRecord.email,
+                    contact: contact || paymentRecord.contact,
+                    paidAt: new Date(),
+                  },
+                });
 
-              if (paymentRecord.invoiceId) {
-                await PaymentsController.completeInvoiceAndSettlement(tx, paymentRecord.invoiceId, paymentId, method);
+                if (paymentRecord.invoiceId) {
+                  await PaymentsController.completeInvoiceAndSettlement(tx, paymentRecord.invoiceId, paymentId, method);
+                }
+              },
+              {
+                maxWait: 10000,
+                timeout: 30000,
               }
-            });
+            );
 
             await logAudit({
               userId: null,
@@ -419,21 +431,27 @@ export class PaymentsController {
       const simulatedPaymentId = paymentId || `pay_sim_${Date.now()}`;
 
       if (event === 'payment.captured') {
-        await prisma.$transaction(async (tx) => {
-          await tx.payment.update({
-            where: { id: paymentRecord.id },
-            data: {
-              status: 'CAPTURED',
-              razorpayPaymentId: simulatedPaymentId,
-              method: 'UPI (PhonePe)',
-              paidAt: new Date(),
-            },
-          });
+        await prisma.$transaction(
+          async (tx) => {
+            await tx.payment.update({
+              where: { id: paymentRecord.id },
+              data: {
+                status: 'CAPTURED',
+                razorpayPaymentId: simulatedPaymentId,
+                method: 'UPI (PhonePe)',
+                paidAt: new Date(),
+              },
+            });
 
-          if (paymentRecord.invoiceId) {
-            await PaymentsController.completeInvoiceAndSettlement(tx, paymentRecord.invoiceId, simulatedPaymentId, 'UPI (PhonePe)');
+            if (paymentRecord.invoiceId) {
+              await PaymentsController.completeInvoiceAndSettlement(tx, paymentRecord.invoiceId, simulatedPaymentId, 'UPI (PhonePe)');
+            }
+          },
+          {
+            maxWait: 10000,
+            timeout: 30000,
           }
-        });
+        );
 
         await logAudit({
           userId: req.user?.id,
@@ -615,22 +633,28 @@ export class PaymentsController {
         }
       }
 
-      await prisma.$transaction(async (tx) => {
-        await tx.payment.update({
-          where: { id: payment.id },
-          data: {
-            status: 'REFUNDED',
-            failureReason: reason || 'Refund issued by Admin',
-          },
-        });
-
-        if (payment.invoiceId) {
-          await tx.invoice.update({
-            where: { id: payment.invoiceId },
-            data: { status: 'REFUNDED' },
+      await prisma.$transaction(
+        async (tx) => {
+          await tx.payment.update({
+            where: { id: payment.id },
+            data: {
+              status: 'REFUNDED',
+              failureReason: reason || 'Refund issued by Admin',
+            },
           });
+
+          if (payment.invoiceId) {
+            await tx.invoice.update({
+              where: { id: payment.invoiceId },
+              data: { status: 'REFUNDED' },
+            });
+          }
+        },
+        {
+          maxWait: 10000,
+          timeout: 30000,
         }
-      });
+      );
 
       await logAudit({
         userId: req.user?.id,

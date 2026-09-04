@@ -92,73 +92,80 @@ export class SettlementEngine {
       throw new Error('No unsettled trips found for this vendor in the specified date range.');
     }
 
-    // Execute in Database Transaction for financial integrity
-    return await prisma.$transaction(async (tx) => {
-      // 1. Create Settlement Header
-      const settlement = await tx.settlement.create({
-        data: {
-          vendorId: params.vendorId,
-          settlementPeriodStart: params.startDate,
-          settlementPeriodEnd: params.endDate,
-          totalTrips: calc.totalTrips,
-          grossAmount: calc.grossAmount,
-          deductions: calc.totalDeductions,
-          netPayable: calc.netPayable,
-          status: 'CALCULATED',
-        },
-      });
-
-      // 2. Create Settlement Items
-      for (const item of calc.items) {
-        await tx.settlementItem.create({
+    // Execute in Database Transaction for financial integrity with extended 30s timeout
+    return await prisma.$transaction(
+      async (tx) => {
+        // 1. Create Settlement Header
+        const settlement = await tx.settlement.create({
           data: {
-            settlementId: settlement.id,
-            tripId: item.tripId,
-            slab: item.slab,
-            tripAmount: item.tripAmount,
-            deduction: item.deduction,
-            payableAmount: item.payableAmount,
-          },
-        });
-
-        // 3. Mark trip status as PROCESSED / SETTLED link
-        await tx.trip.update({
-          where: { id: item.tripId },
-          data: {
-            settlementId: settlement.id,
-            status: 'PROCESSED',
-          },
-        });
-      }
-
-      // 4. Create Deductions records
-      for (const d of calc.deductionsList) {
-        await tx.deduction.create({
-          data: {
-            settlementId: settlement.id,
-            type: d.type,
-            amount: d.amount,
-            reason: d.reason,
-          },
-        });
-      }
-
-      // 5. Audit Log
-      await tx.auditLog.create({
-        data: {
-          userId: userId || null,
-          action: 'GENERATE_SETTLEMENT',
-          entity: 'Settlement',
-          entityId: settlement.id,
-          newValue: JSON.stringify({
             vendorId: params.vendorId,
+            settlementPeriodStart: params.startDate,
+            settlementPeriodEnd: params.endDate,
+            totalTrips: calc.totalTrips,
+            grossAmount: calc.grossAmount,
+            deductions: calc.totalDeductions,
             netPayable: calc.netPayable,
-            tripsCount: calc.totalTrips,
-          }),
-        },
-      });
+            status: 'CALCULATED',
+          },
+        });
 
-      return settlement;
-    });
+        // 2. Bulk Create Settlement Items
+        if (calc.items.length > 0) {
+          await tx.settlementItem.createMany({
+            data: calc.items.map((item) => ({
+              settlementId: settlement.id,
+              tripId: item.tripId,
+              slab: item.slab,
+              tripAmount: item.tripAmount,
+              deduction: item.deduction,
+              payableAmount: item.payableAmount,
+            })),
+          });
+
+          // 3. Bulk Mark trips status as PROCESSED & link settlement
+          const tripIds = calc.items.map((item) => item.tripId);
+          await tx.trip.updateMany({
+            where: { id: { in: tripIds } },
+            data: {
+              settlementId: settlement.id,
+              status: 'PROCESSED',
+            },
+          });
+        }
+
+        // 4. Bulk Create Deductions records
+        if (calc.deductionsList.length > 0) {
+          await tx.deduction.createMany({
+            data: calc.deductionsList.map((d) => ({
+              settlementId: settlement.id,
+              type: d.type,
+              amount: d.amount,
+              reason: d.reason,
+            })),
+          });
+        }
+
+        // 5. Audit Log
+        await tx.auditLog.create({
+          data: {
+            userId: userId || null,
+            action: 'GENERATE_SETTLEMENT',
+            entity: 'Settlement',
+            entityId: settlement.id,
+            newValue: JSON.stringify({
+              vendorId: params.vendorId,
+              netPayable: calc.netPayable,
+              tripsCount: calc.totalTrips,
+            }),
+          },
+        });
+
+        return settlement;
+      },
+      {
+        maxWait: 10000,
+        timeout: 30000,
+      }
+    );
   }
 }

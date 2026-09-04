@@ -123,33 +123,39 @@ export class SettlementsController {
       if (!settlement) return res.status(404).json({ error: 'Settlement not found' });
 
       // Execute in Transaction
-      const result = await prisma.$transaction(async (tx) => {
-        const payment = await tx.payment.create({
-          data: {
-            settlementId: id,
-            amount: parseFloat(amount || settlement.netPayable),
-            paymentMethod: paymentMethod || 'BANK_TRANSFER',
-            referenceNumber: referenceNumber || `REF-${Date.now()}`,
-            status: 'SUCCESS',
-          },
-        });
+      const result = await prisma.$transaction(
+        async (tx) => {
+          const payment = await tx.payment.create({
+            data: {
+              settlementId: id,
+              amount: parseFloat(amount || settlement.netPayable),
+              paymentMethod: paymentMethod || 'BANK_TRANSFER',
+              referenceNumber: referenceNumber || `REF-${Date.now()}`,
+              status: 'SUCCESS',
+            },
+          });
 
-        const updatedSettlement = await tx.settlement.update({
-          where: { id },
-          data: {
-            status: 'PAID',
-            paidAt: new Date(),
-          },
-        });
+          const updatedSettlement = await tx.settlement.update({
+            where: { id },
+            data: {
+              status: 'PAID',
+              paidAt: new Date(),
+            },
+          });
 
-        // Update connected trips to SETTLED
-        await tx.trip.updateMany({
-          where: { settlementId: id },
-          data: { status: 'SETTLED' },
-        });
+          // Update connected trips to SETTLED
+          await tx.trip.updateMany({
+            where: { settlementId: id },
+            data: { status: 'SETTLED' },
+          });
 
-        return { payment, settlement: updatedSettlement };
-      });
+          return { payment, settlement: updatedSettlement };
+        },
+        {
+          maxWait: 10000,
+          timeout: 30000,
+        }
+      );
 
       await logAudit({
         userId: req.user?.id,
