@@ -1,22 +1,28 @@
 import React, { useState } from 'react';
-import { BarChart3, Download, FileText, Calendar, Filter } from 'lucide-react';
+import { BarChart3, Download, FileText, Calendar, Filter, Building2 } from 'lucide-react';
 import api from '../services/api';
+import { useAuth } from '../context/AuthContext';
 
 export const ReportsPage: React.FC = () => {
+  const { user } = useAuth();
   const [reportType, setReportType] = useState('trips');
   const [startDate, setStartDate] = useState(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]);
   const [endDate, setEndDate] = useState(new Date().toISOString().split('T')[0]);
   const [loading, setLoading] = useState(false);
   const [reportData, setReportData] = useState<any[]>([]);
 
+  const isClient = user?.role === 'CLIENT';
+
   const handleFetchReport = async () => {
     setLoading(true);
     try {
       const endpoint = reportType === 'pnl' ? '/reports/profit-loss' : '/reports/trips';
-      const res = await api.get(`${endpoint}?startDate=${startDate}&endDate=${endDate}`);
+      const clientParam = isClient && user?.clientId ? `&clientId=${user.clientId}` : '';
+      const res = await api.get(`${endpoint}?startDate=${startDate}&endDate=${endDate}${clientParam}`);
       setReportData(res.data);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Fetch report error:', err);
+      alert(err.response?.data?.error || 'Failed to fetch report');
     } finally {
       setLoading(false);
     }
@@ -26,7 +32,8 @@ export const ReportsPage: React.FC = () => {
     try {
       const endpoint = reportType === 'pnl' ? '/reports/profit-loss' : '/reports/trips';
       const fileName = reportType === 'pnl' ? 'Profit_Loss_Report.csv' : 'Trips_Report.csv';
-      const res = await api.get(`${endpoint}?startDate=${startDate}&endDate=${endDate}&format=csv`, {
+      const clientParam = isClient && user?.clientId ? `&clientId=${user.clientId}` : '';
+      const res = await api.get(`${endpoint}?startDate=${startDate}&endDate=${endDate}&format=csv${clientParam}`, {
         responseType: 'blob',
       });
       const blob = new Blob([res.data], { type: 'text/csv' });
@@ -37,7 +44,7 @@ export const ReportsPage: React.FC = () => {
       a.click();
       URL.revokeObjectURL(url);
     } catch (err: any) {
-      alert('Failed to download CSV report. Please try again.');
+      alert(err.response?.data?.error || 'Failed to download CSV report. Please try again.');
     }
   };
 
@@ -47,7 +54,9 @@ export const ReportsPage: React.FC = () => {
         <div>
           <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Financial & Operational Reports</h1>
           <p className="text-xs text-gray-500 mt-0.5">
-            Generate detailed trip statements, corporate client revenue, vendor payouts & P&L reports with CSV export
+            {isClient
+              ? `Authorized tenant report center for ${user?.clientName || 'your corporate client account'}`
+              : 'Generate detailed trip statements, corporate client revenue, vendor payouts & P&L reports with CSV export'}
           </p>
         </div>
 
@@ -59,6 +68,13 @@ export const ReportsPage: React.FC = () => {
           <span>Export CSV Report</span>
         </button>
       </div>
+
+      {isClient && (
+        <div className="bg-brand-50 border border-brand-200 rounded-xl p-4 flex items-center space-x-3 text-brand-800 text-xs font-semibold">
+          <Building2 className="w-5 h-5 text-brand-600 shrink-0" />
+          <span>Authenticated Tenant: <strong>{user?.clientName || 'Corporate Client'}</strong> (Client ID: {user?.clientId}). All reports are locked to your company data.</span>
+        </div>
+      )}
 
       {/* Controls Bar */}
       <div className="bg-white p-5 rounded-2xl border border-gray-200 shadow-xs flex flex-wrap items-center justify-between gap-4">
@@ -91,9 +107,10 @@ export const ReportsPage: React.FC = () => {
 
         <button
           onClick={handleFetchReport}
-          className="px-4 py-2 bg-brand-600 hover:bg-brand-700 text-white rounded-xl font-semibold text-xs shadow-xs"
+          disabled={loading}
+          className="px-4 py-2 bg-brand-600 hover:bg-brand-700 text-white rounded-xl font-semibold text-xs shadow-xs disabled:opacity-50"
         >
-          Generate Report Preview
+          {loading ? 'Generating...' : 'Generate Report Preview'}
         </button>
       </div>
 
@@ -166,3 +183,4 @@ export const ReportsPage: React.FC = () => {
     </div>
   );
 };
+

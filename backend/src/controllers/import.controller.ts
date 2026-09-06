@@ -4,6 +4,7 @@ import Papa from 'papaparse';
 import { prisma } from '../config/prisma';
 import { NormalizationService } from '../services/normalization.service';
 import { logAudit } from '../common/utils/audit.logger';
+import { isClientUser } from '../common/guards/tenant.guard';
 
 export class ImportController {
   static async uploadAndReadHeaders(req: any, res: Response) {
@@ -52,7 +53,15 @@ export class ImportController {
 
   static async saveMappingTemplate(req: any, res: Response) {
     try {
-      const { clientId, templateName, mappings } = req.body;
+      let { clientId, templateName, mappings } = req.body;
+
+      if (isClientUser(req)) {
+        if (clientId && String(clientId) !== req.user.clientId) {
+          return res.status(403).json({ error: 'Forbidden: Cannot save import mappings for another company tenant' });
+        }
+        clientId = req.user.clientId;
+      }
+
       if (!clientId || !mappings) {
         return res.status(400).json({ error: 'clientId and mappings are required' });
       }
@@ -89,7 +98,15 @@ export class ImportController {
 
   static async processImport(req: any, res: Response) {
     try {
-      const { clientId, fileName, rawRows, mappings } = req.body;
+      let { clientId, fileName, rawRows, mappings } = req.body;
+
+      if (isClientUser(req)) {
+        if (clientId && String(clientId) !== req.user.clientId) {
+          return res.status(403).json({ error: 'Forbidden: Cannot import trip logs for another company tenant' });
+        }
+        clientId = req.user.clientId;
+      }
+
       if (!clientId || !rawRows || !Array.isArray(rawRows) || !mappings) {
         return res.status(400).json({ error: 'Invalid import parameters' });
       }
@@ -229,7 +246,13 @@ export class ImportController {
 
   static async getHistory(req: any, res: Response) {
     try {
+      const where: any = {};
+      if (isClientUser(req)) {
+        where.clientId = req.user.clientId;
+      }
+
       const jobs = await prisma.importJob.findMany({
+        where,
         orderBy: { createdAt: 'desc' },
         include: {
           client: { select: { name: true } },
@@ -243,3 +266,4 @@ export class ImportController {
     }
   }
 }
+

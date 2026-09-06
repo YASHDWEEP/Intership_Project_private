@@ -16,30 +16,58 @@ import {
   LogOut,
   Sparkles,
   Mail,
+  UserCog,
 } from 'lucide-react';
+import { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
+import api from '../services/api';
 
 export const Sidebar: React.FC = () => {
   const { user, logout } = useAuth();
   const role = user?.role || 'ADMIN';
+  const [rolePermissions, setRolePermissions] = useState<string[]>([]);
+
+  useEffect(() => {
+    let isMounted = true;
+    api.get('/roles')
+      .then((res) => {
+        if (!isMounted) return;
+        const currentRoleObj = (res.data || []).find((r: any) => r.name === role);
+        if (currentRoleObj && Array.isArray(currentRoleObj.permissions)) {
+          setRolePermissions(currentRoleObj.permissions);
+        }
+      })
+      .catch(() => {});
+
+    return () => {
+      isMounted = false;
+    };
+  }, [role]);
 
   const allNavItems = [
-    { label: 'Dashboard', path: '/', icon: LayoutDashboard, roles: ['ADMIN', 'OPERATIONS', 'ACCOUNTS', 'VENDOR', 'CLIENT'] },
-    { label: 'Trips', path: '/trips', icon: Car, roles: ['ADMIN', 'OPERATIONS', 'ACCOUNTS', 'VENDOR'] },
-    { label: 'Import Center', path: '/import-center', icon: FileSpreadsheet, roles: ['ADMIN', 'OPERATIONS'] },
-    { label: 'Clients', path: '/clients', icon: Building2, roles: ['ADMIN', 'OPERATIONS', 'ACCOUNTS'] },
-    { label: 'Vendors', path: '/vendors', icon: Users2, roles: ['ADMIN', 'OPERATIONS', 'ACCOUNTS'] },
-    { label: 'Vehicles', path: '/vehicles', icon: Truck, roles: ['ADMIN', 'OPERATIONS'] },
-    { label: 'Pricing Rules', path: '/pricing', icon: IndianRupee, roles: ['ADMIN'] },
-    { label: 'Invoices', path: '/invoices', icon: Receipt, roles: ['ADMIN', 'ACCOUNTS', 'VENDOR', 'CLIENT'] },
-    { label: 'Payments', path: '/payments', icon: CreditCard, roles: ['ADMIN', 'ACCOUNTS', 'CLIENT'] },
-    { label: 'Settlements', path: '/settlements', icon: Landmark, roles: ['ADMIN', 'ACCOUNTS', 'VENDOR'] },
-    { label: 'Email Center', path: '/email-center', icon: Mail, roles: ['ADMIN', 'ACCOUNTS', 'OPERATIONS', 'CLIENT', 'VENDOR'] },
-    { label: 'Reports', path: '/reports', icon: BarChart3, roles: ['ADMIN', 'ACCOUNTS', 'CLIENT'] },
-    { label: 'Audit Logs', path: '/audit-logs', icon: ShieldCheck, roles: ['ADMIN'] },
+    { label: 'Dashboard', path: '/', icon: LayoutDashboard, permKey: 'dashboard', roles: ['ADMIN', 'OPERATIONS', 'ACCOUNTS', 'VENDOR', 'CLIENT', 'EMPLOYEE', 'MANAGER'] },
+    { label: 'Trips', path: '/trips', icon: Car, permKey: 'trips', roles: ['ADMIN', 'OPERATIONS', 'ACCOUNTS', 'VENDOR', 'EMPLOYEE', 'MANAGER'] },
+    { label: 'Import Center', path: '/import-center', icon: FileSpreadsheet, permKey: 'import-center', roles: ['ADMIN', 'OPERATIONS'] },
+    { label: 'Clients', path: '/clients', icon: Building2, permKey: 'clients', roles: ['ADMIN', 'OPERATIONS', 'ACCOUNTS', 'MANAGER'] },
+    { label: 'Vendors', path: '/vendors', icon: Users2, permKey: 'vendors', roles: ['ADMIN', 'OPERATIONS', 'ACCOUNTS', 'MANAGER'] },
+    { label: 'Vehicles', path: '/vehicles', icon: Truck, permKey: 'vehicles', roles: ['ADMIN', 'OPERATIONS', 'MANAGER'] },
+    { label: 'Pricing Rules', path: '/pricing', icon: IndianRupee, permKey: 'pricing', roles: ['ADMIN'] },
+    { label: 'Invoices', path: '/invoices', icon: Receipt, permKey: 'invoices', roles: ['ADMIN', 'ACCOUNTS', 'CLIENT'] },
+    { label: 'Payments', path: '/payments', icon: CreditCard, permKey: 'payments', roles: ['ADMIN', 'ACCOUNTS', 'CLIENT'] },
+    { label: 'Settlements', path: '/settlements', icon: Landmark, permKey: 'settlements', roles: ['ADMIN', 'ACCOUNTS', 'VENDOR'] },
+    { label: 'Email Center', path: '/email-center', icon: Mail, permKey: 'email-center', roles: ['ADMIN', 'ACCOUNTS', 'OPERATIONS', 'CLIENT', 'VENDOR', 'EMPLOYEE', 'MANAGER'] },
+    { label: 'Reports', path: '/reports', icon: BarChart3, permKey: 'reports', roles: ['ADMIN', 'ACCOUNTS', 'CLIENT', 'MANAGER'] },
+    { label: 'Users & Roles', path: '/users', icon: UserCog, permKey: 'users', roles: ['ADMIN'] },
+    { label: 'Audit Logs', path: '/audit-logs', icon: ShieldCheck, permKey: 'audit-logs', roles: ['ADMIN'] },
   ];
 
-  const allowedItems = allNavItems.filter((item) => item.roles.includes(role));
+  const allowedItems = allNavItems.filter((item) => {
+    if (role === 'ADMIN' || rolePermissions.includes('*')) return true;
+    if (rolePermissions.length > 0) {
+      return rolePermissions.includes(item.permKey);
+    }
+    return item.roles.includes(role);
+  });
 
   return (
     <aside className="w-64 bg-slate-900 text-slate-300 h-screen flex flex-col fixed left-0 top-0 z-30 shadow-xl border-r border-slate-800">

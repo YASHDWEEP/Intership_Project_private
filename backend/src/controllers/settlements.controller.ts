@@ -4,22 +4,28 @@ import { SettlementEngine } from '../services/settlement.engine';
 import { PdfService } from '../services/pdf.service';
 import { EmailService } from '../services/email.service';
 import { logAudit } from '../common/utils/audit.logger';
+import { isClientUser } from '../common/guards/tenant.guard';
 
 export class SettlementsController {
   static async getAll(req: any, res: Response) {
     try {
+      if (isClientUser(req)) {
+        return res.status(403).json({ error: 'Forbidden: Corporate Client accounts are not authorized to view vendor settlement records.' });
+      }
+
       let where: any = {};
       if (req.user?.role === 'VENDOR' && req.user.vendorId) {
         where.vendorId = req.user.vendorId;
       }
+
 
       const settlements = await prisma.settlement.findMany({
         where,
         orderBy: { createdAt: 'desc' },
         include: {
           vendor: { select: { id: true, name: true, companyName: true } },
-          payments: true,
-          deductionRecords: true,
+          payments: { select: { id: true, status: true, amount: true, createdAt: true } },
+          deductionRecords: { select: { id: true, type: true, amount: true } },
           _count: { select: { trips: true, items: true } },
         },
       });
@@ -31,7 +37,12 @@ export class SettlementsController {
 
   static async getById(req: any, res: Response) {
     try {
+      if (isClientUser(req)) {
+        return res.status(403).json({ error: 'Forbidden: Corporate Client accounts are not authorized to view vendor settlement records.' });
+      }
+
       const { id } = req.params;
+
       const settlement = await prisma.settlement.findUnique({
         where: { id },
         include: {
@@ -108,6 +119,11 @@ export class SettlementsController {
         newValue: { status: 'APPROVED' },
       });
 
+      // Asynchronously trigger automated settlement approval email to vendor
+      EmailService.sendSettlementEmail(id, 'APPROVED').catch((err) => {
+        console.error('Failed to send settlement approval email:', err);
+      });
+
       return res.json(settlement);
     } catch (err: any) {
       return res.status(500).json({ error: err.message });
@@ -165,6 +181,11 @@ export class SettlementsController {
         newValue: { amount, paymentMethod, referenceNumber },
       });
 
+      // Asynchronously trigger automated settlement payment receipt email to vendor
+      EmailService.sendSettlementEmail(id, 'PAID').catch((err) => {
+        console.error('Failed to send settlement payout email:', err);
+      });
+
       return res.json(result);
     } catch (err: any) {
       return res.status(500).json({ error: err.message });
@@ -173,7 +194,12 @@ export class SettlementsController {
 
   static async downloadPdf(req: any, res: Response) {
     try {
+      if (isClientUser(req)) {
+        return res.status(403).json({ error: 'Forbidden: Corporate Client accounts are not authorized to view vendor settlement records.' });
+      }
+
       const { id } = req.params;
+
       const settlement = await prisma.settlement.findUnique({
         where: { id },
         include: {
@@ -208,6 +234,16 @@ export class SettlementsController {
         message: `Settlement PDF email sent successfully to ${result.email}`,
         previewUrl: result.previewUrl,
       });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  }
+
+  static async delete(req: any, res: Response) {
+    try {
+      const { id } = req.params;
+      await SettlementEngine.deleteSettlement(id, req.user?.id);
+      return res.json({ message: 'Settlement deleted successfully and trips reset to unsettled' });
     } catch (err: any) {
       return res.status(500).json({ error: err.message });
     }

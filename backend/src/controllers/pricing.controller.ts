@@ -2,11 +2,18 @@ import { Response } from 'express';
 import { prisma } from '../config/prisma';
 import { PricingEngine } from '../services/pricing.engine';
 import { logAudit } from '../common/utils/audit.logger';
+import { isClientUser } from '../common/guards/tenant.guard';
 
 export class PricingController {
   static async getAll(req: any, res: Response) {
     try {
+      const where: any = {};
+      if (isClientUser(req)) {
+        where.clientId = req.user.clientId;
+      }
+
       const rules = await prisma.pricingRule.findMany({
+        where,
         include: {
           client: true,
           slabs: { orderBy: { minKm: 'asc' } },
@@ -21,7 +28,14 @@ export class PricingController {
 
   static async create(req: any, res: Response) {
     try {
-      const { clientId, vehicleType, ruleName, pricingType, slabs } = req.body;
+      let { clientId, vehicleType, ruleName, pricingType, slabs } = req.body;
+
+      if (isClientUser(req)) {
+        if (clientId && String(clientId) !== req.user.clientId) {
+          return res.status(403).json({ error: 'Forbidden: Cannot create pricing rules for another company tenant' });
+        }
+        clientId = req.user.clientId;
+      }
 
       const rule = await prisma.pricingRule.create({
         data: {
@@ -57,7 +71,14 @@ export class PricingController {
 
   static async calculatePreview(req: any, res: Response) {
     try {
-      const { clientId, vehicleType, totalKm, vendorId, waitingTime, tollAmount, parkingAmount } = req.body;
+      let { clientId, vehicleType, totalKm, vendorId, waitingTime, tollAmount, parkingAmount } = req.body;
+
+      if (isClientUser(req)) {
+        if (clientId && String(clientId) !== req.user.clientId) {
+          return res.status(403).json({ error: 'Forbidden: Cannot calculate pricing for another company tenant' });
+        }
+        clientId = req.user.clientId;
+      }
 
       if (!clientId || !vehicleType || totalKm === undefined) {
         return res.status(400).json({ error: 'clientId, vehicleType, and totalKm are required' });
@@ -79,3 +100,4 @@ export class PricingController {
     }
   }
 }
+

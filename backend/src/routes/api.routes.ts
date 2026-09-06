@@ -14,6 +14,8 @@ import { ReportsController } from '../controllers/reports.controller';
 import { AuditController } from '../controllers/audit.controller';
 import { PaymentsController } from '../controllers/payments.controller';
 import { EmailsController } from '../controllers/emails.controller';
+import { UsersController } from '../controllers/users.controller';
+import { RolesController } from '../controllers/roles.controller';
 import { authGuard } from '../common/guards/auth.guard';
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
@@ -63,11 +65,11 @@ router.post('/imports/process', authGuard(['ADMIN', 'OPERATIONS']), ImportContro
 router.get('/imports/history', authGuard(), ImportController.getHistory);
 
 // Invoice Routes
-router.get('/invoices', authGuard(), InvoicesController.getAll);
-router.get('/invoices/:id', authGuard(), InvoicesController.getById);
+router.get('/invoices', authGuard(['ADMIN', 'ACCOUNTS', 'CLIENT']), InvoicesController.getAll);
+router.get('/invoices/:id', authGuard(['ADMIN', 'ACCOUNTS', 'CLIENT']), InvoicesController.getById);
 router.post('/invoices/generate', authGuard(['ADMIN', 'ACCOUNTS']), InvoicesController.generateInvoice);
-router.get('/invoices/:id/pdf', authGuard(), InvoicesController.downloadPdf);
-router.post('/invoices/:id/send-email', authGuard(), InvoicesController.sendEmail);
+router.get('/invoices/:id/pdf', authGuard(['ADMIN', 'ACCOUNTS', 'CLIENT']), InvoicesController.downloadPdf);
+router.post('/invoices/:id/send-email', authGuard(['ADMIN', 'ACCOUNTS', 'CLIENT']), InvoicesController.sendEmail);
 router.put('/invoices/:id/status', authGuard(['ADMIN', 'ACCOUNTS']), InvoicesController.updateStatus);
 
 // Vendor Settlement Routes
@@ -79,6 +81,7 @@ router.put('/settlements/:id/approve', authGuard(['ADMIN', 'ACCOUNTS']), Settlem
 router.post('/settlements/:id/pay', authGuard(['ADMIN', 'ACCOUNTS']), SettlementsController.recordPayment);
 router.get('/settlements/:id/pdf', authGuard(), SettlementsController.downloadPdf);
 router.post('/settlements/:id/send-email', authGuard(), SettlementsController.sendEmail);
+router.delete('/settlements/:id', authGuard(['ADMIN', 'ACCOUNTS']), SettlementsController.delete);
 
 // Dashboard & Analytics Routes
 router.get('/analytics/dashboard', authGuard(), AnalyticsController.getDashboard);
@@ -95,6 +98,7 @@ router.put('/notifications/:id/read', authGuard(), AuditController.markNotificat
 // Razorpay Payment System Routes
 router.post('/payments/create-order', authGuard(), PaymentsController.createOrder);
 router.post('/payments/verify', authGuard(), PaymentsController.verifyPayment);
+router.post('/payments/mark-failed', authGuard(), PaymentsController.markFailed);
 router.post('/payments/webhook/razorpay', PaymentsController.handleWebhook);
 router.post('/payments/test-webhook-trigger', PaymentsController.triggerTestWebhook);
 router.get('/payments/status/:invoiceId', authGuard(), PaymentsController.getPaymentStatus);
@@ -105,5 +109,18 @@ router.post('/payments/:id/refund', authGuard(['ADMIN', 'ACCOUNTS']), PaymentsCo
 router.get('/emails', authGuard(), EmailsController.getAll);
 router.get('/emails/:id', authGuard(), EmailsController.getById);
 router.post('/emails/simulate-inbound', authGuard(), EmailsController.simulateInbound);
+
+// User & Role Management Routes (Admin Only)
+router.get('/users', authGuard(['ADMIN']), UsersController.getAll);
+router.get('/users/:id', authGuard(['ADMIN']), UsersController.getById);
+router.post('/users', authGuard(['ADMIN']), UsersController.create);
+router.put('/users/:id', authGuard(['ADMIN']), UsersController.update);
+router.delete('/users/:id', authGuard(['ADMIN']), UsersController.delete);
+
+// Dynamic Role Management Routes
+router.get('/roles', authGuard(), RolesController.getAll);
+router.post('/roles', authGuard(['ADMIN']), RolesController.create);
+router.put('/roles/:id', authGuard(['ADMIN']), RolesController.update);
+router.delete('/roles/:id', authGuard(['ADMIN']), RolesController.delete);
 
 export default router;

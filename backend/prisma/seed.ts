@@ -7,26 +7,28 @@ async function main() {
   console.log('🌱 Starting CabMitra Database Seeding...');
 
   // Clean existing data
-  await prisma.auditLog.deleteMany();
-  await prisma.notification.deleteMany();
-  await prisma.importError.deleteMany();
-  await prisma.importJob.deleteMany();
-  await prisma.importMapping.deleteMany();
-  await prisma.invoiceItem.deleteMany();
-  await prisma.invoice.deleteMany();
-  await prisma.payment.deleteMany();
-  await prisma.deduction.deleteMany();
-  await prisma.settlementItem.deleteMany();
-  await prisma.settlement.deleteMany();
-  await prisma.trip.deleteMany();
-  await prisma.pricingSlab.deleteMany();
-  await prisma.pricingRule.deleteMany();
-  await prisma.vehicle.deleteMany();
-  await prisma.user.deleteMany();
-  await prisma.vendor.deleteMany();
-  await prisma.client.deleteMany();
+  try {
+    await prisma.emailLog.deleteMany();
+    await prisma.auditLog.deleteMany();
+    await prisma.notification.deleteMany();
+    await prisma.importError.deleteMany();
+    await prisma.importJob.deleteMany();
+    await prisma.importMapping.deleteMany();
+    await prisma.invoiceItem.deleteMany();
+    await prisma.invoice.deleteMany();
+    await prisma.payment.deleteMany();
+    await prisma.deduction.deleteMany();
+    await prisma.settlementItem.deleteMany();
+    await prisma.settlement.deleteMany();
+    await prisma.trip.deleteMany();
+    await prisma.pricingSlab.deleteMany();
+    await prisma.pricingRule.deleteMany();
+    await prisma.vehicle.deleteMany();
+  } catch (err) {
+    console.warn('Cleanup warning:', err);
+  }
 
-  const passwordHash = await bcrypt.hash('Password@123', 10);
+  const passwordHash = '$2a$10$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeg6Lruj3vjPGga31lW';
 
   // 1. Create Clients
   const clientsData = [
@@ -39,8 +41,13 @@ async function main() {
 
   const clients = [];
   for (const c of clientsData) {
-    const created = await prisma.client.create({ data: c });
-    clients.push(created);
+    const existing = await prisma.client.findFirst({ where: { name: c.name } });
+    if (existing) {
+      clients.push(existing);
+    } else {
+      const created = await prisma.client.create({ data: c });
+      clients.push(created);
+    }
   }
 
   // 2. Create Vendors
@@ -50,20 +57,20 @@ async function main() {
     { name: 'Venkateshwara Cabs', companyName: 'Venkateshwara Motors', gstNumber: '29CDEFG3456H1Z3', phone: '+91 98451 00003', email: 'info@venkatcabs.in', address: 'Whitefield Main Rd, Bengaluru', commissionType: 'FIXED', commissionValue: 50.0 },
     { name: 'Blue Sky Cabs', companyName: 'Blue Sky Logistics', gstNumber: '29DEFGH4567I1Z4', phone: '+91 98451 00004', email: 'dispatch@blueskycabs.com', address: 'HSR Layout, Bengaluru', commissionType: 'PERCENTAGE', commissionValue: 10.0 },
     { name: 'Om Sai Logistics', companyName: 'Om Sai Tours', gstNumber: '29EFGHI5678J1Z5', phone: '+91 98451 00005', email: 'bookings@omsai.com', address: 'Indiranagar 100ft Rd, Bengaluru', commissionType: 'PERCENTAGE', commissionValue: 9.0 },
-    { name: 'Apex Executive Cabs', companyName: 'Apex Mobility Ltd', gstNumber: '29FGHIJ6789K1Z6', phone: '+91 98451 00006', email: 'support@apexcabs.com', address: 'Marathahalli, Bengaluru', commissionType: 'PERCENTAGE', commissionValue: 10.0 },
-    { name: 'City Mobility Hub', companyName: 'City Express Mobility', gstNumber: '29GHIJK7890L1Z7', phone: '+91 98451 00007', email: 'ops@citymobility.com', address: 'Bellandur, Bengaluru', commissionType: 'PERCENTAGE', commissionValue: 8.0 },
-    { name: 'GreenEV Cabs', companyName: 'Green EV Transit India', gstNumber: '29HIJKL8901M1Z8', phone: '+91 98451 00008', email: 'green@evcabs.in', address: 'Jayanagar 4th Block, Bengaluru', commissionType: 'PERCENTAGE', commissionValue: 7.5 },
-    { name: 'Royal Star Fleet', companyName: 'Royal Star Travels', gstNumber: '29IJKLM9012N1Z9', phone: '+91 98451 00009', email: 'admin@royalstar.com', address: 'Hebbal, Bengaluru', commissionType: 'PERCENTAGE', commissionValue: 10.0 },
-    { name: 'Metro Mobility Services', companyName: 'Metro Cabs Corp', gstNumber: '29JKLMN0123O1Z0', phone: '+91 98451 00010', email: 'info@metrocabs.com', address: 'MG Road, Bengaluru', commissionType: 'PERCENTAGE', commissionValue: 9.5 },
   ];
 
   const vendors = [];
   for (const v of vendorsData) {
-    const created = await prisma.vendor.create({ data: v });
-    vendors.push(created);
+    const existing = await prisma.vendor.findFirst({ where: { name: v.name } });
+    if (existing) {
+      vendors.push(existing);
+    } else {
+      const created = await prisma.vendor.create({ data: v });
+      vendors.push(created);
+    }
   }
 
-  // 3. Create Vehicles (20 vehicles)
+  // 3. Create Vehicles
   const vehicleTypes = ['4 Seater', '6 Seater', 'EV', 'Sedan', 'SUV'];
   const fuelTypes = ['DIESEL', 'CNG', 'ELECTRIC', 'PETROL'];
   const vehicles = [];
@@ -74,28 +81,40 @@ async function main() {
     const fType = vType === 'EV' ? 'ELECTRIC' : fuelTypes[i % fuelTypes.length];
     const regNo = `KA-0${(i % 5) + 1}-MJ-${1000 + i * 42}`;
 
-    const created = await prisma.vehicle.create({
-      data: {
-        vendorId: vendor.id,
-        vehicleNumber: regNo,
-        vehicleType: vType,
-        seatingCapacity: vType === '6 Seater' || vType === 'SUV' ? 6 : 4,
-        fuelType: fType,
-      },
-    });
-    vehicles.push(created);
+    const existing = await prisma.vehicle.findUnique({ where: { vehicleNumber: regNo } });
+    if (existing) {
+      vehicles.push(existing);
+    } else {
+      const created = await prisma.vehicle.create({
+        data: {
+          vendorId: vendor.id,
+          vehicleNumber: regNo,
+          vehicleType: vType,
+          seatingCapacity: vType === '6 Seater' || vType === 'SUV' ? 6 : 4,
+          fuelType: fType,
+        },
+      });
+      vehicles.push(created);
+    }
   }
 
-  // 4. Create Seed Users
-  await prisma.user.createMany({
-    data: [
-      { name: 'System Admin', email: 'admin@cabmitra.com', passwordHash, role: 'ADMIN', status: 'ACTIVE' },
-      { name: 'Ops Controller', email: 'operations@cabmitra.com', passwordHash, role: 'OPERATIONS', status: 'ACTIVE' },
-      { name: 'Accounts Manager', email: 'accounts@cabmitra.com', passwordHash, role: 'ACCOUNTS', status: 'ACTIVE' },
-      { name: 'Ramesh Vendor User', email: 'vendor@cabmitra.com', passwordHash, role: 'VENDOR', status: 'ACTIVE', vendorId: vendors[0].id },
-      { name: 'Infosys Client Portal', email: 'client@cabmitra.com', passwordHash, role: 'CLIENT', status: 'ACTIVE', clientId: clients[0].id },
-    ],
-  });
+  // 4. Create/Upsert Seed Users for Demo Login
+  const seedUsers = [
+    { name: 'System Admin', email: 'admin@cabmitra.com', passwordHash, role: 'ADMIN', status: 'ACTIVE' },
+    { name: 'Ops Controller', email: 'operations@cabmitra.com', passwordHash, role: 'OPERATIONS', status: 'ACTIVE' },
+    { name: 'Accounts Manager', email: 'accounts@cabmitra.com', passwordHash, role: 'ACCOUNTS', status: 'ACTIVE' },
+    { name: 'Ramesh Vendor User', email: 'vendor@cabmitra.com', passwordHash, role: 'VENDOR', status: 'ACTIVE', vendorId: vendors[0].id },
+    { name: 'Infosys Client Portal', email: 'client@cabmitra.com', passwordHash, role: 'CLIENT', status: 'ACTIVE', clientId: clients[0].id },
+  ];
+
+  for (const u of seedUsers) {
+    await prisma.user.upsert({
+      where: { email: u.email },
+      update: { passwordHash: u.passwordHash, status: 'ACTIVE', clientId: u.clientId || null, vendorId: u.vendorId || null },
+      create: u,
+    });
+  }
+
 
   // 5. Create Pricing Rules & Slabs
   for (const client of clients) {
@@ -285,9 +304,44 @@ async function main() {
         message: 'Platform initialized successfully with 5 clients, 10 vendors, 20 vehicles, and 115+ trips.',
       },
     });
+
+    // 10. Seed Email Logs
+    const infosysClient = clients[0];
+    const infosysInvoice = await prisma.invoice.findFirst({ where: { clientId: infosysClient.id } });
+
+    await prisma.emailLog.create({
+      data: {
+        direction: 'INBOUND',
+        type: 'INBOUND_QUERY',
+        from: 'rajesh.s@infosys.com',
+        to: 'support@cabmitra.com',
+        subject: 'Re: Cab Operations Monthly Invoice & Trip Verification (Infosys Limited)',
+        bodyHtml: '<p>Hi CabMitra Operations Team,</p><p>We have received the monthly cab billing details for August. Could you please provide the itemized CSV trip logs for our Electronics City pickup routes for internal verification?</p><p>Regards,<br><strong>Rajesh Sharma</strong><br>Corporate Transport & Logistics<br>Infosys Limited</p>',
+        status: 'DELIVERED',
+        entityType: 'Query',
+      },
+    });
+
+    if (infosysInvoice) {
+      await prisma.emailLog.create({
+        data: {
+          direction: 'OUTBOUND',
+          type: 'TAX_INVOICE',
+          from: 'billing@cabmitra.com',
+          to: 'rajesh.s@infosys.com',
+          subject: `[CabMitra] Tax Invoice ${infosysInvoice.invoiceNumber} - ₹${infosysInvoice.totalAmount.toLocaleString('en-IN')}`,
+          bodyHtml: `<p>Dear <strong>Rajesh Sharma</strong>,</p><p>Please find attached your Tax Invoice <strong>#${infosysInvoice.invoiceNumber}</strong> for corporate cab operations.</p>`,
+          status: 'DELIVERED',
+          entityType: 'Invoice',
+          entityId: infosysInvoice.id,
+          attachment: `${infosysInvoice.invoiceNumber}.pdf`,
+        },
+      });
+    }
   }
 
   console.log('✅ Database Seeding Completed Successfully!');
+
 }
 
 main()

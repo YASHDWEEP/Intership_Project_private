@@ -1,4 +1,5 @@
 import { prisma } from '../config/prisma';
+import { EmailService } from './email.service';
 
 export interface SettlementCalculationParams {
   vendorId: string;
@@ -86,6 +87,22 @@ export class SettlementEngine {
   }
 
   static async generateAndSaveSettlement(params: SettlementCalculationParams, userId?: string) {
+    // Check if an unapproved/pending CALCULATED settlement already exists for this vendor
+    const existingPending = await prisma.settlement.findFirst({
+      where: {
+        vendorId: params.vendorId,
+        status: { in: ['DRAFT', 'CALCULATED'] },
+      },
+      include: { vendor: true },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (existingPending) {
+      throw new Error(
+        `An active pending settlement (${existingPending.status}) already exists for vendor '${existingPending.vendor?.name || 'this vendor'}'. Please approve, pay, or delete the existing pending settlement first before calculating a new one.`
+      );
+    }
+
     const calc = await this.calculateSettlement(params);
 
     if (calc.trips.length === 0) {
@@ -160,7 +177,60 @@ export class SettlementEngine {
           },
         });
 
+        // Asynchronously trigger automated settlement PDF email to vendor
+        EmailService.sendSettlementEmail(settlement.id, 'CALCULATED').catch((err) => {
+          console.error('Failed to send automated settlement calculation email:', err);
+        });
+
         return settlement;
+      },
+      {
+        maxWait: 10000,
+        timeout: 30000,
+      }
+    );
+  }
+
+  static async deleteSettlement(id: string, userId?: string) {
+    const settlement = await prisma.settlement.findUnique({ where: { id } });
+    if (!settlement) {
+      throw new Error('Settlement record not found');
+    }
+
+    if (settlement.status === 'PAID') {
+      throw new Error('Cannot delete a settlement that has already been PAID.');
+    }
+
+    return await prisma.$transaction(
+      async (tx) => {
+        // 1. Reset connected trips back to UNSETTLED (settlementId: null, status: 'VALIDATED')
+        await tx.trip.updateMany({
+          where: { settlementId: id },
+          data: {
+            settlementId: null,
+            status: 'VALIDATED',
+          },
+        });
+
+        // 2. Delete settlement items & deductions
+        await tx.settlementItem.deleteMany({ where: { settlementId: id } });
+        await tx.deduction.deleteMany({ where: { settlementId: id } });
+
+        // 3. Delete settlement header
+        await tx.settlement.delete({ where: { id } });
+
+        // 4. Audit Log
+        await tx.auditLog.create({
+          data: {
+            userId: userId || null,
+            action: 'DELETE',
+            entity: 'Settlement',
+            entityId: id,
+            oldValue: JSON.stringify(settlement),
+          },
+        });
+
+        return true;
       },
       {
         maxWait: 10000,

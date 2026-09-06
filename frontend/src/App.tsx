@@ -2,6 +2,7 @@ import React, { useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import api from './services/api';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { ToastProvider } from './context/ToastContext';
 import { Sidebar } from './components/Sidebar';
 import { Header } from './components/Header';
 import { Login } from './pages/Login';
@@ -22,6 +23,7 @@ import { SettlementsPage } from './pages/SettlementsPage';
 import { EmailCenterPage } from './pages/EmailCenterPage';
 import { ReportsPage } from './pages/ReportsPage';
 import { AuditLogsPage } from './pages/AuditLogsPage';
+import { UserRolesPage } from './pages/UserRolesPage';
 
 const ProtectedLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user } = useAuth();
@@ -155,6 +157,14 @@ export const AppRoutes: React.FC = () => {
         }
       />
       <Route
+        path="/users"
+        element={
+          <ProtectedLayout>
+            <UserRolesPage />
+          </ProtectedLayout>
+        }
+      />
+      <Route
         path="/audit-logs"
         element={
           <ProtectedLayout>
@@ -182,11 +192,13 @@ export const App: React.FC = () => {
   }, []);
 
   return (
-    <AuthProvider>
-      <Router>
-        <AppRoutes />
-      </Router>
-    </AuthProvider>
+    <ToastProvider>
+      <AuthProvider>
+        <Router>
+          <AppRoutes />
+        </Router>
+      </AuthProvider>
+    </ToastProvider>
   );
 };
 

@@ -1,5 +1,6 @@
 import { Response } from 'express';
 import { prisma } from '../config/prisma';
+import { isClientUser } from '../common/guards/tenant.guard';
 
 export class AnalyticsController {
   static async getDashboard(req: any, res: Response) {
@@ -34,14 +35,21 @@ export class AnalyticsController {
       let tripWhere: any = {};
       if (dateFilter.gte || dateFilter.lte) tripWhere.tripDate = dateFilter;
 
-      if (req.user?.role === 'CLIENT' && req.user.clientId) {
-        tripWhere.clientId = req.user.clientId;
+      const userClientId = isClientUser(req) ? req.user.clientId : undefined;
+
+      if (userClientId) {
+        tripWhere.clientId = userClientId;
       } else if (req.user?.role === 'VENDOR' && req.user.vendorId) {
         tripWhere.vendorId = req.user.vendorId;
       }
 
+      // Tenant-scoped filters for related models
+      const invoiceWhere: any = userClientId ? { clientId: userClientId } : {};
+      const paymentWhere: any = userClientId ? { invoice: { clientId: userClientId } } : {};
+      const importJobWhere: any = userClientId ? { clientId: userClientId } : {};
+
       // 1. KPI Aggregations
-      const tripAggregates = await prisma.trip.aggregate({
+      const tripAggregatesPromise = prisma.trip.aggregate({
         where: tripWhere,
         _count: { id: true },
         _sum: {
@@ -51,18 +59,13 @@ export class AnalyticsController {
         },
       });
 
-      const totalTrips = tripAggregates._count.id || 0;
-      const totalKm = Math.round((tripAggregates._sum.totalKm || 0) * 10) / 10;
-      const totalRevenue = Math.round(tripAggregates._sum.tripRevenue || 0);
-      const vendorCost = Math.round(tripAggregates._sum.vendorCost || 0);
-      const grossMargin = totalRevenue - vendorCost;
-      const marginPercentage = totalRevenue > 0 ? Math.round((grossMargin / totalRevenue) * 1000) / 10 : 0;
-
-      // Pending Settlements & Invoices & Import Errors count & Real-time Payment Metrics
       const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
       const startOfCurrentMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+      const sixMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 6, 1);
 
+      // Execute all independent DB aggregations & breakdowns concurrently in parallel
       const [
+        tripAggregates,
         pendingSettlements,
         pendingInvoicesCount,
         paidInvoicesCount,
@@ -71,14 +74,23 @@ export class AnalyticsController {
         todayPaymentsAgg,
         monthPaymentsAgg,
         successfulPayments,
+        recentTrips,
+        clientTrips,
+        clients,
+        vendorTrips,
+        vendors,
+        statusCounts,
+        vehicleTypeCounts,
       ] = await Promise.all([
+        tripAggregatesPromise,
         prisma.settlement.count({ where: { status: { in: ['DRAFT', 'CALCULATED'] } } }),
-        prisma.invoice.count({ where: { status: { in: ['DRAFT', 'GENERATED', 'SENT', 'PENDING'] } } }),
-        prisma.invoice.count({ where: { status: 'PAID' } }),
-        prisma.payment.count({ where: { status: 'FAILED' } }),
-        prisma.importError.count(),
+        prisma.invoice.count({ where: { ...invoiceWhere, status: { in: ['DRAFT', 'GENERATED', 'SENT', 'PENDING'] } } }),
+        prisma.invoice.count({ where: { ...invoiceWhere, status: 'PAID' } }),
+        prisma.payment.count({ where: { ...paymentWhere, status: 'FAILED' } }),
+        userClientId ? prisma.importError.count({ where: { importJob: { clientId: userClientId } } }) : prisma.importError.count(),
         prisma.payment.aggregate({
           where: {
+            ...paymentWhere,
             status: { in: ['CAPTURED', 'SUCCESS'] },
             createdAt: { gte: startOfToday },
           },
@@ -86,6 +98,7 @@ export class AnalyticsController {
         }),
         prisma.payment.aggregate({
           where: {
+            ...paymentWhere,
             status: { in: ['CAPTURED', 'SUCCESS'] },
             createdAt: { gte: startOfCurrentMonth },
           },
@@ -93,12 +106,58 @@ export class AnalyticsController {
         }),
         prisma.payment.findMany({
           where: {
+            ...paymentWhere,
             status: { in: ['CAPTURED', 'SUCCESS'] },
+            createdAt: { gte: sixMonthsAgo },
           },
           orderBy: { createdAt: 'asc' },
+          take: 1000,
           select: { amount: true, createdAt: true, method: true },
         }),
+        prisma.trip.findMany({
+          where: tripWhere,
+          orderBy: { tripDate: 'asc' },
+          take: 2500,
+          select: { tripDate: true, tripRevenue: true, vendorCost: true, vehicleType: true },
+        }),
+        prisma.trip.groupBy({
+          by: ['clientId'],
+          where: tripWhere,
+          _sum: { tripRevenue: true, totalKm: true },
+          _count: { id: true },
+        }),
+        prisma.client.findMany({
+          where: userClientId ? { id: userClientId } : {},
+          select: { id: true, name: true },
+        }),
+        prisma.trip.groupBy({
+          by: ['vendorId'],
+          where: tripWhere,
+          _sum: { vendorCost: true },
+          _count: { id: true },
+        }),
+        prisma.vendor.findMany({
+          select: { id: true, name: true },
+        }),
+        prisma.trip.groupBy({
+          by: ['status'],
+          where: tripWhere,
+          _count: { id: true },
+        }),
+        prisma.trip.groupBy({
+          by: ['vehicleType'],
+          where: tripWhere,
+          _count: { id: true },
+          _sum: { tripRevenue: true },
+        }),
       ]);
+
+      const totalTrips = tripAggregates._count.id || 0;
+      const totalKm = Math.round((tripAggregates._sum.totalKm || 0) * 10) / 10;
+      const totalRevenue = Math.round(tripAggregates._sum.tripRevenue || 0);
+      const vendorCost = Math.round(tripAggregates._sum.vendorCost || 0);
+      const grossMargin = totalRevenue - vendorCost;
+      const marginPercentage = totalRevenue > 0 ? Math.round((grossMargin / totalRevenue) * 1000) / 10 : 0;
 
       const todayPayments = Math.round(todayPaymentsAgg._sum.amount || 0);
       const monthPayments = Math.round(monthPaymentsAgg._sum.amount || 0);
@@ -117,12 +176,6 @@ export class AnalyticsController {
       const paymentCollectionTrend = Object.values(collectionMap);
 
       // 2. Revenue vs Vendor Cost Trend (Grouped by Month/Day)
-      const recentTrips = await prisma.trip.findMany({
-        where: tripWhere,
-        orderBy: { tripDate: 'asc' },
-        select: { tripDate: true, tripRevenue: true, vendorCost: true, vehicleType: true },
-      });
-
       const trendMap: Record<string, { month: string; revenue: number; cost: number; margin: number; trips: number }> = {};
 
       recentTrips.forEach((t) => {
@@ -139,14 +192,6 @@ export class AnalyticsController {
       const revenueTrend = Object.values(trendMap);
 
       // 3. Client-wise Revenue Breakdown
-      const clientTrips = await prisma.trip.groupBy({
-        by: ['clientId'],
-        where: tripWhere,
-        _sum: { tripRevenue: true, totalKm: true },
-        _count: { id: true },
-      });
-
-      const clients = await prisma.client.findMany();
       const clientRevenue = clientTrips.map((ct) => {
         const clientObj = clients.find((c) => c.id === ct.clientId);
         return {
@@ -158,14 +203,6 @@ export class AnalyticsController {
       });
 
       // 4. Vendor Performance Breakdown
-      const vendorTrips = await prisma.trip.groupBy({
-        by: ['vendorId'],
-        where: tripWhere,
-        _sum: { vendorCost: true },
-        _count: { id: true },
-      });
-
-      const vendors = await prisma.vendor.findMany();
       const vendorPerformance = vendorTrips.map((vt) => {
         const vendorObj = vendors.find((v) => v.id === vt.vendorId);
         return {
@@ -176,25 +213,12 @@ export class AnalyticsController {
       });
 
       // 5. Trip Status Distribution
-      const statusCounts = await prisma.trip.groupBy({
-        by: ['status'],
-        where: tripWhere,
-        _count: { id: true },
-      });
-
       const tripStatusDistribution = statusCounts.map((s) => ({
         status: s.status,
         count: s._count.id,
       }));
 
       // 6. Vehicle Type Distribution
-      const vehicleTypeCounts = await prisma.trip.groupBy({
-        by: ['vehicleType'],
-        where: tripWhere,
-        _count: { id: true },
-        _sum: { tripRevenue: true },
-      });
-
       const vehicleTypeDistribution = vehicleTypeCounts.map((v) => ({
         vehicleType: v.vehicleType,
         trips: v._count.id,
@@ -209,7 +233,7 @@ export class AnalyticsController {
           vendorCost,
           grossMargin,
           marginPercentage,
-          pendingSettlements,
+          pendingSettlements: isClientUser(req) ? 0 : pendingSettlements,
           pendingInvoices: pendingInvoicesCount,
           paidInvoices: paidInvoicesCount,
           failedPayments: failedPaymentsCount,
@@ -231,3 +255,4 @@ export class AnalyticsController {
     }
   }
 }
+

@@ -4,6 +4,7 @@ import { prisma } from '../config/prisma';
 import { razorpayInstance, getRazorpayKeyId, getRazorpayWebhookSecret } from '../config/razorpay';
 import { logAudit } from '../common/utils/audit.logger';
 import { EmailService } from '../services/email.service';
+import { isClientUser, validateTenantAccess } from '../common/guards/tenant.guard';
 
 export class PaymentsController {
   /**
@@ -50,6 +51,26 @@ export class PaymentsController {
             });
           }
         }
+      }
+    }
+
+    // 5. Clean up any duplicate 0-trip ghost invoices for this client & billing period
+    const paidInv = await tx.invoice.findUnique({ where: { id: invoiceId } });
+    if (paidInv) {
+      const duplicateGhosts = await tx.invoice.findMany({
+        where: {
+          clientId: paidInv.clientId,
+          billingPeriodStart: paidInv.billingPeriodStart,
+          billingPeriodEnd: paidInv.billingPeriodEnd,
+          id: { not: invoiceId },
+          status: { in: ['GENERATED', 'PENDING'] },
+          trips: { none: {} },
+        },
+      });
+
+      for (const ghost of duplicateGhosts) {
+        await tx.invoiceItem.deleteMany({ where: { invoiceId: ghost.id } });
+        await tx.invoice.delete({ where: { id: ghost.id } });
       }
     }
   }
@@ -171,6 +192,12 @@ export class PaymentsController {
         return res.status(400).json({ error: 'Missing required payment verification fields' });
       }
 
+      const invoice = await prisma.invoice.findUnique({ where: { id: invoiceId } });
+      if (!invoice) {
+        return res.status(404).json({ error: 'Invoice not found' });
+      }
+      if (!validateTenantAccess(req, res, invoice.clientId)) return;
+
       const secret = process.env.RAZORPAY_KEY_SECRET || 'cabmitra_razorpay_secret_key_2026';
       
       let isValidSignature = true;
@@ -182,9 +209,16 @@ export class PaymentsController {
         isValidSignature = (expectedSignature === razorpaySignature);
       }
 
-      const paymentRecord = await prisma.payment.findFirst({
+      let paymentRecord = await prisma.payment.findFirst({
         where: { razorpayOrderId },
       });
+
+      if (!paymentRecord && invoiceId) {
+        paymentRecord = await prisma.payment.findFirst({
+          where: { invoiceId, status: { not: 'CAPTURED' } },
+          orderBy: { createdAt: 'desc' },
+        });
+      }
 
       if (!isValidSignature) {
         if (paymentRecord) {
@@ -201,19 +235,21 @@ export class PaymentsController {
         return res.status(400).json({ success: false, error: 'Razorpay signature verification failed' });
       }
 
-      let paymentMethod = 'UPI';
+      let paymentMethod = req.body.method ? String(req.body.method).toUpperCase() : 'CARD';
       let rzpEmail = undefined;
       let rzpContact = undefined;
 
       try {
-        const rzpPayment: any = await razorpayInstance.payments.fetch(razorpayPaymentId);
-        if (rzpPayment) {
-          paymentMethod = (rzpPayment.method || 'UPI').toUpperCase();
-          rzpEmail = rzpPayment.email;
-          rzpContact = rzpPayment.contact;
+        if (razorpayPaymentId && !razorpayPaymentId.startsWith('pay_card_') && !razorpayPaymentId.startsWith('pay_test_')) {
+          const rzpPayment: any = await razorpayInstance.payments.fetch(razorpayPaymentId);
+          if (rzpPayment) {
+            paymentMethod = (rzpPayment.method || paymentMethod).toUpperCase();
+            rzpEmail = rzpPayment.email;
+            rzpContact = rzpPayment.contact;
+          }
         }
       } catch (err) {
-        paymentMethod = 'UPI';
+        // Preserve resolved paymentMethod (CARD/UPI/NETBANKING)
       }
 
       const paidAt = new Date();
@@ -524,6 +560,8 @@ export class PaymentsController {
         return res.status(404).json({ error: 'Invoice not found' });
       }
 
+      if (!validateTenantAccess(req, res, invoice.clientId)) return;
+
       const latestPayment = invoice.payments[0] || null;
 
       return res.json({
@@ -553,7 +591,7 @@ export class PaymentsController {
         where.status = (status as string).toUpperCase();
       }
 
-      if (req.user?.role === 'CLIENT' && req.user.clientId) {
+      if (isClientUser(req)) {
         where.invoice = { clientId: req.user.clientId };
       } else if (clientId) {
         where.invoice = { clientId: clientId as string };
@@ -673,6 +711,80 @@ export class PaymentsController {
     } catch (err: any) {
       console.error('Refund Error:', err);
       return res.status(500).json({ error: err.message || 'Refund operation failed' });
+    }
+  }
+
+  /**
+   * POST /api/payments/mark-failed
+   * Mark transaction & invoice as FAILED immediately when Razorpay returns failure
+   */
+  static async markFailed(req: any, res: Response) {
+    try {
+      const { invoiceId, razorpayOrderId, reason } = req.body;
+      if (!invoiceId) {
+        return res.status(400).json({ error: 'invoiceId is required' });
+      }
+
+      const invoice = await prisma.invoice.findUnique({ where: { id: invoiceId } });
+      if (!invoice) {
+        return res.status(404).json({ error: 'Invoice not found' });
+      }
+
+      if (!validateTenantAccess(req, res, invoice.clientId)) return;
+
+      const failureReason = reason || 'Payment declined or cancelled by user';
+
+      let paymentRecord = null;
+      if (razorpayOrderId) {
+        paymentRecord = await prisma.payment.findFirst({ where: { razorpayOrderId } });
+      }
+      if (!paymentRecord) {
+        paymentRecord = await prisma.payment.findFirst({
+          where: { invoiceId },
+          orderBy: { createdAt: 'desc' },
+        });
+      }
+
+      if (paymentRecord) {
+        await prisma.payment.update({
+          where: { id: paymentRecord.id },
+          data: { status: 'FAILED', failureReason },
+        });
+      } else {
+        await prisma.payment.create({
+          data: {
+            invoiceId,
+            razorpayOrderId: razorpayOrderId || `order_fail_${Date.now()}`,
+            amount: invoice.totalAmount,
+            currency: 'INR',
+            status: 'FAILED',
+            failureReason,
+          },
+        });
+      }
+
+      await prisma.invoice.update({
+        where: { id: invoiceId },
+        data: { status: 'FAILED' },
+      });
+
+      await logAudit({
+        userId: req.user?.id,
+        action: 'PAYMENT_FAILED',
+        entity: 'Invoice',
+        entityId: invoiceId,
+        newValue: { razorpayOrderId, reason: failureReason },
+      });
+
+      return res.json({
+        success: true,
+        message: 'Transaction marked as failed',
+        status: 'FAILED',
+        failureReason,
+      });
+    } catch (err: any) {
+      console.error('Mark Failed Payment Error:', err);
+      return res.status(500).json({ error: err.message || 'Failed to mark payment as failed' });
     }
   }
 }

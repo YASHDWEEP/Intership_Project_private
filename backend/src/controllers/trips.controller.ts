@@ -2,6 +2,7 @@ import { Response } from 'express';
 import { prisma } from '../config/prisma';
 import { PricingEngine } from '../services/pricing.engine';
 import { logAudit } from '../common/utils/audit.logger';
+import { isClientUser, validateTenantAccess } from '../common/guards/tenant.guard';
 
 export class TripsController {
   static async getAll(req: any, res: Response) {
@@ -25,7 +26,10 @@ export class TripsController {
       let filterClientId = clientId;
       let filterVendorId = vendorId;
 
-      if (req.user?.role === 'CLIENT' && req.user.clientId) {
+      if (isClientUser(req)) {
+        if (clientId && String(clientId) !== req.user.clientId) {
+          return res.status(403).json({ error: 'Forbidden: You cannot access trips for another company tenant' });
+        }
         filterClientId = req.user.clientId;
       }
       if (req.user?.role === 'VENDOR' && req.user.vendorId) {
@@ -82,7 +86,7 @@ export class TripsController {
 
   static async create(req: any, res: Response) {
     try {
-      const {
+      let {
         tripDate,
         clientId,
         vendorId,
@@ -97,6 +101,13 @@ export class TripsController {
         tollAmount,
         parkingAmount,
       } = req.body;
+
+      if (isClientUser(req)) {
+        if (clientId && String(clientId) !== req.user.clientId) {
+          return res.status(403).json({ error: 'Forbidden: You cannot create trips for another company tenant' });
+        }
+        clientId = req.user.clientId;
+      }
 
       if (!tripDate || !clientId || !vendorId || !vehicleNumber || totalKm === undefined) {
         return res.status(400).json({ error: 'Missing mandatory trip fields' });
@@ -163,11 +174,21 @@ export class TripsController {
       const oldTrip = await prisma.trip.findUnique({ where: { id } });
       if (!oldTrip) return res.status(404).json({ error: 'Trip not found' });
 
+      if (!validateTenantAccess(req, res, oldTrip.clientId)) return;
+
+      if (isClientUser(req) && req.body.clientId && String(req.body.clientId) !== req.user.clientId) {
+        return res.status(403).json({ error: 'Forbidden: You cannot assign a trip to another company tenant' });
+      }
+
       // Recalculate pricing if KM or vehicleType changed
       let updateData = { ...req.body };
+      if (isClientUser(req)) {
+        updateData.clientId = req.user.clientId;
+      }
+
       if (req.body.totalKm || req.body.vehicleType || req.body.clientId) {
         const pricing = await PricingEngine.calculateTripPricing({
-          clientId: req.body.clientId || oldTrip.clientId,
+          clientId: updateData.clientId || oldTrip.clientId,
           vehicleType: req.body.vehicleType || oldTrip.vehicleType,
           totalKm: parseFloat(req.body.totalKm || oldTrip.totalKm),
           vendorId: req.body.vendorId || oldTrip.vendorId,
@@ -209,6 +230,8 @@ export class TripsController {
       const oldTrip = await prisma.trip.findUnique({ where: { id } });
       if (!oldTrip) return res.status(404).json({ error: 'Trip not found' });
 
+      if (!validateTenantAccess(req, res, oldTrip.clientId)) return;
+
       await prisma.trip.delete({ where: { id } });
 
       await logAudit({
@@ -225,3 +248,4 @@ export class TripsController {
     }
   }
 }
+

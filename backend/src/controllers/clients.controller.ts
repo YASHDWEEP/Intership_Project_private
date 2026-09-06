@@ -1,11 +1,18 @@
 import { Response } from 'express';
 import { prisma } from '../config/prisma';
 import { logAudit } from '../common/utils/audit.logger';
+import { isClientUser, validateTenantAccess } from '../common/guards/tenant.guard';
 
 export class ClientsController {
   static async getAll(req: any, res: Response) {
     try {
+      const where: any = {};
+      if (isClientUser(req)) {
+        where.id = req.user.clientId;
+      }
+
       const clients = await prisma.client.findMany({
+        where,
         orderBy: { name: 'asc' },
         include: {
           _count: {
@@ -22,6 +29,9 @@ export class ClientsController {
   static async getById(req: any, res: Response) {
     try {
       const { id } = req.params;
+
+      if (!validateTenantAccess(req, res, id)) return;
+
       const client = await prisma.client.findUnique({
         where: { id },
         include: {
@@ -70,6 +80,10 @@ export class ClientsController {
     try {
       const { id } = req.params;
       const oldClient = await prisma.client.findUnique({ where: { id } });
+      if (!oldClient) return res.status(404).json({ error: 'Client not found' });
+
+      if (!validateTenantAccess(req, res, id)) return;
+
       const client = await prisma.client.update({
         where: { id },
         data: req.body,
@@ -90,3 +104,4 @@ export class ClientsController {
     }
   }
 }
+

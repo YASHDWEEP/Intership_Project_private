@@ -277,13 +277,17 @@ export class EmailService {
   /**
    * Send Vendor Settlement PDF Email to Vendor Contact Email
    */
-  static async sendSettlementEmail(settlementId: string): Promise<{ success: boolean; previewUrl?: string; email: string }> {
+  static async sendSettlementEmail(
+    settlementId: string,
+    eventStage: 'CALCULATED' | 'APPROVED' | 'PAID' = 'CALCULATED'
+  ): Promise<{ success: boolean; previewUrl?: string; email: string }> {
     const settlement = await prisma.settlement.findUnique({
       where: { id: settlementId },
       include: {
         vendor: true,
         items: true,
         deductionRecords: true,
+        payments: { orderBy: { createdAt: 'desc' } },
       },
     });
 
@@ -293,26 +297,48 @@ export class EmailService {
 
     const recipientEmail = settlement.vendor.email || 'vendor@travels.com';
     const senderEmail = process.env.SMTP_FROM || 'settlements@cabmitra.com';
-    const subject = `[CabMitra Settlement] Payout Breakdown - ₹${settlement.netPayable.toLocaleString('en-IN')}`;
+
+    let stageTitle = 'Vendor Settlement Statement';
+    let stageSubject = `[CabMitra Settlement] Payout Statement - ₹${settlement.netPayable.toLocaleString('en-IN')}`;
+    let stageColor = '#1e3a8a';
+    let statusText = settlement.status;
+
+    if (eventStage === 'APPROVED' || settlement.status === 'APPROVED') {
+      stageTitle = 'Settlement Approved for Payout';
+      stageSubject = `[CabMitra Settlement Approved] Payout Approved - ₹${settlement.netPayable.toLocaleString('en-IN')}`;
+      stageColor = '#4f46e5';
+      statusText = 'APPROVED';
+    } else if (eventStage === 'PAID' || settlement.status === 'PAID') {
+      stageTitle = 'Settlement Payout Completed (PAID)';
+      stageSubject = `[CabMitra Payout Receipt] Payment Transferred - ₹${settlement.netPayable.toLocaleString('en-IN')}`;
+      stageColor = '#059669';
+      statusText = 'PAID';
+    }
+
+    const latestPayment = settlement.payments && settlement.payments[0];
 
     const bodyHtml = `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e5e7eb; border-radius: 12px; padding: 24px; color: #1f2937;">
-        <div style="background-color: #1e3a8a; padding: 16px; border-radius: 8px; text-align: center;">
+        <div style="background-color: ${stageColor}; padding: 16px; border-radius: 8px; text-align: center;">
           <h1 style="color: #ffffff; margin: 0; font-size: 24px;">CABMITRA VENDOR PAYOUT</h1>
-          <p style="color: #93c5fd; margin: 4px 0 0 0; font-size: 13px;">Settlement Statement</p>
+          <p style="color: #93c5fd; margin: 4px 0 0 0; font-size: 13px;">${stageTitle}</p>
         </div>
 
-        <h2 style="color: #1e3a8a; margin-top: 24px;">Vendor Settlement Statement</h2>
+        <h2 style="color: ${stageColor}; margin-top: 24px;">${stageTitle}</h2>
         <p>Dear <strong>${settlement.vendor.name}</strong>,</p>
-        <p>Your settlement statement for period <strong>${new Date(settlement.settlementPeriodStart).toLocaleDateString('en-IN')} to ${new Date(settlement.settlementPeriodEnd).toLocaleDateString('en-IN')}</strong> has been compiled.</p>
+        <p>Your settlement statement for period <strong>${new Date(settlement.settlementPeriodStart).toLocaleDateString('en-IN')} to ${new Date(settlement.settlementPeriodEnd).toLocaleDateString('en-IN')}</strong> is updated below.</p>
 
         <table style="width: 100%; border-collapse: collapse; margin: 20px 0; background-color: #f9fafb; border-radius: 8px;">
+          <tr>
+            <td style="padding: 12px; font-weight: bold; border-bottom: 1px solid #e5e7eb;">Status:</td>
+            <td style="padding: 12px; border-bottom: 1px solid #e5e7eb; font-weight: bold; color: ${stageColor};">${statusText}</td>
+          </tr>
           <tr>
             <td style="padding: 12px; font-weight: bold; border-bottom: 1px solid #e5e7eb;">Total Trips Executed:</td>
             <td style="padding: 12px; border-bottom: 1px solid #e5e7eb;">${settlement.totalTrips}</td>
           </tr>
           <tr>
-            <td style="padding: 12px; font-weight: bold; border-bottom: 1px solid #e5e7eb;">Gross Vendor Cost:</td>
+            <td style="padding: 12px; font-weight: bold; border-bottom: 1px solid #e5e7eb;">Gross Vendor Earnings:</td>
             <td style="padding: 12px; border-bottom: 1px solid #e5e7eb;">₹${settlement.grossAmount.toLocaleString('en-IN')}</td>
           </tr>
           <tr>
@@ -323,13 +349,25 @@ export class EmailService {
             <td style="padding: 12px; font-weight: bold; font-size: 16px;">Net Payable Payout:</td>
             <td style="padding: 12px; font-weight: bold; font-size: 16px; color: #059669;">₹${settlement.netPayable.toLocaleString('en-IN')}</td>
           </tr>
+          ${
+            latestPayment
+              ? `
+          <tr>
+            <td style="padding: 12px; font-weight: bold; border-top: 1px solid #e5e7eb;">Payment Ref / UTR:</td>
+            <td style="padding: 12px; border-top: 1px solid #e5e7eb; font-family: monospace;">${latestPayment.referenceNumber || 'N/A'} (${latestPayment.paymentMethod || 'BANK_TRANSFER'})</td>
+          </tr>
+          `
+              : ''
+          }
         </table>
 
         <p style="font-size: 14px;">The complete trip-wise breakdown PDF is attached to this email.</p>
         <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 24px 0;" />
-        <p style="font-size: 12px; color: #6b7280; text-align: center;">CabMitra Vendor Settlement Module</p>
+        <p style="font-size: 12px; color: #6b7280; text-align: center;">CabMitra Enterprise ERP Vendor Settlement Module</p>
       </div>
     `;
+
+    const subject = stageSubject;
 
     const pdfBuffer = await PdfService.createSettlementPdf(
       settlement,

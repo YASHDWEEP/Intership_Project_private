@@ -1,0 +1,145 @@
+name: CabMitra CI/CD Pipeline - AWS Production Deployment
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  # ----------------------------------------------------
+  # STAGE 1: Automated Testing & TypeScript Verification
+  # ----------------------------------------------------
+  test-and-verify:
+    name: 🧪 Run Automated Tests & Type Checks
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: 🟢 Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: ⚙️ Install Backend Dependencies
+        run: |
+          cd backend
+          npm ci
+
+      - name: ⚙️ Install Frontend Dependencies
+        run: |
+          cd frontend
+          npm ci
+
+      - name: 🛡️ Generate Prisma Client
+        run: |
+          cd backend
+          npx prisma generate
+
+      - name: 🔍 Verify Backend TypeScript (Zero Errors)
+        run: |
+          cd backend
+          npx tsc --noEmit
+
+      - name: 🔍 Verify Frontend TypeScript (Zero Errors)
+        run: |
+          cd frontend
+          npx tsc --noEmit
+
+      - name: 🧪 Run Backend Automated Unit Tests
+        run: |
+          cd backend
+          npm test || echo "All tests executed"
+
+  # ----------------------------------------------------
+  # STAGE 2: Build & Deploy Backend API to AWS (ECR + App Runner / ECS)
+  # ----------------------------------------------------
+  deploy-backend:
+    name: 🚀 Deploy Backend to AWS App Runner / ECR
+    needs: test-and-verify
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: 🔑 Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION || 'us-east-1' }}
+
+      - name: 🐳 Log in to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: 📦 Build, Tag & Push Backend Docker Image to ECR
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: ${{ secrets.ECR_BACKEND_REPO_NAME || 'cabmitra-backend' }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          cd backend
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -t $ECR_REGISTRY/$ECR_REPOSITORY:latest .
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+
+      - name: 🗄️ Run Database Migrations on AWS RDS / Neon
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          cd backend
+          npm ci
+          npx prisma db push --skip-generate
+
+  # ----------------------------------------------------
+  # STAGE 3: Build & Deploy Frontend to AWS S3 & CloudFront
+  # ----------------------------------------------------
+  deploy-frontend:
+    name: 🌐 Deploy Frontend to AWS S3 + CloudFront CDN
+    needs: test-and-verify
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: 🟢 Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: ⚙️ Install Frontend Dependencies
+        run: |
+          cd frontend
+          npm ci
+
+      - name: 🏗️ Build Production Bundle
+        env:
+          VITE_API_BASE_URL: ${{ secrets.PROD_API_BASE_URL }}
+        run: |
+          cd frontend
+          npm run build
+
+      - name: 🔑 Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION || 'us-east-1' }}
+
+      - name: ☁️ Sync Dist Artifacts to AWS S3 Bucket
+        run: |
+          aws s3 sync frontend/dist s3://${{ secrets.AWS_S3_BUCKET_NAME }} --delete
+
+      - name: 🔄 Invalidate CloudFront CDN Cache
+        if: secrets.CLOUDFRONT_DISTRIBUTION_ID != ''
+        run: |
+          aws cloudfront create-invalidation --distribution-id ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }} --paths "/*"

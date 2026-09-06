@@ -25,10 +25,14 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(() => {
-    const savedUser = localStorage.getItem('cabmitra_user');
+    // Clear legacy localStorage persisted tokens so fresh browser launches always start at /login
+    localStorage.removeItem('cabmitra_token');
+    localStorage.removeItem('cabmitra_user');
+
+    const savedUser = sessionStorage.getItem('cabmitra_user');
     return savedUser ? JSON.parse(savedUser) : null;
   });
-  const [token, setToken] = useState<string | null>(() => localStorage.getItem('cabmitra_token'));
+  const [token, setToken] = useState<string | null>(() => sessionStorage.getItem('cabmitra_token'));
   const [loading, setLoading] = useState(false);
 
   const login = async (email: string, password: string) => {
@@ -37,8 +41,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const res = await api.post('/auth/login', { email, password });
       const { token, user } = res.data;
 
-      localStorage.setItem('cabmitra_token', token);
-      localStorage.setItem('cabmitra_user', JSON.stringify(user));
+      sessionStorage.setItem('cabmitra_token', token);
+      sessionStorage.setItem('cabmitra_user', JSON.stringify(user));
+      localStorage.removeItem('cabmitra_token');
+      localStorage.removeItem('cabmitra_user');
 
       setToken(token);
       setUser(user);
@@ -52,6 +58,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const logout = () => {
+    sessionStorage.removeItem('cabmitra_token');
+    sessionStorage.removeItem('cabmitra_user');
     localStorage.removeItem('cabmitra_token');
     localStorage.removeItem('cabmitra_user');
     setToken(null);

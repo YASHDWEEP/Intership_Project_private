@@ -1,16 +1,44 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Receipt, Plus, Download, FileText, CheckCircle, Send, Calendar, CreditCard, Clock, CheckCircle2, Sparkles } from 'lucide-react';
+import { Receipt, Plus, Download, FileText, CheckCircle, Send, Calendar, CreditCard, Clock, CheckCircle2, Sparkles, XCircle, Lock } from 'lucide-react';
 import api from '../services/api';
 import { StatusBadge } from '../components/StatusBadge';
 import { Modal } from '../components/Modal';
+import { useAuth } from '../context/AuthContext';
 
 export const InvoicesPage: React.FC = () => {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [invoices, setInvoices] = useState<any[]>([]);
   const [clients, setClients] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [payingInvoiceId, setPayingInvoiceId] = useState<string | null>(null);
+  const [generatingInvoice, setGeneratingInvoice] = useState(false);
+
+  // Restrict VENDOR role access completely
+  if (user?.role === 'VENDOR') {
+    return (
+      <div className="p-8">
+        <div className="bg-rose-50 border border-rose-200 rounded-2xl p-8 max-w-2xl mx-auto text-center space-y-5 shadow-sm">
+          <div className="w-12 h-12 bg-rose-100 text-rose-600 rounded-2xl flex items-center justify-center mx-auto">
+            <Lock className="w-6 h-6" />
+          </div>
+          <h2 className="text-xl font-bold text-gray-900">Access Restricted</h2>
+          <p className="text-sm text-gray-600">
+            Vendor Transport Partner accounts do not have access to Corporate Client Billing Invoices. Please navigate to <strong>Settlements</strong> to view vendor earnings and payout details.
+          </p>
+          <div className="pt-2 flex justify-center">
+            <button
+              onClick={() => navigate('/settlements')}
+              className="inline-flex items-center gap-2 px-5 py-2.5 bg-brand-600 hover:bg-brand-700 text-white font-semibold text-xs rounded-xl transition-all shadow-sm hover:shadow cursor-pointer"
+            >
+              Go to Vendor Settlements
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   // Generator Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -49,12 +77,25 @@ export const InvoicesPage: React.FC = () => {
 
   const handleGenerateInvoice = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (generatingInvoice) return;
+    setGeneratingInvoice(true);
     try {
-      await api.post('/invoices/generate', formData);
+      const res = await api.post('/invoices/generate', formData);
       setIsModalOpen(false);
-      fetchInvoices();
+      await fetchInvoices();
+
+      if (res.status === 200 || res.data?.alreadyExists) {
+        alert(
+          res.data?.message ||
+            `Invoice #${res.data?.invoiceNumber || ''} for previous data in this billing period has already been generated successfully!`
+        );
+      } else {
+        alert(`Invoice #${res.data?.invoiceNumber || ''} generated successfully!`);
+      }
     } catch (err: any) {
       alert(err.response?.data?.error || 'Failed to generate invoice');
+    } finally {
+      setGeneratingInvoice(false);
     }
   };
 
@@ -302,7 +343,17 @@ export const InvoicesPage: React.FC = () => {
                         </button>
                       )}
 
-                      {inv.status !== 'PAID' && inv.status !== 'PENDING' && (
+                      {inv.status === 'FAILED' && (
+                        <button
+                          onClick={() => navigate(`/payment/failed?invoiceId=${inv.id}`)}
+                          className="px-2.5 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-lg font-semibold text-[11px] border border-rose-200 transition-colors inline-flex items-center gap-1 cursor-pointer"
+                        >
+                          <XCircle className="w-3.5 h-3.5 text-rose-600" />
+                          FAILURE RECEIPT
+                        </button>
+                      )}
+
+                      {inv.status !== 'PAID' && inv.status !== 'PENDING' && inv.status !== 'FAILED' && (
                         <button
                           onClick={() => handleDirectPayNow(inv)}
                           disabled={isPayingThis}
@@ -382,16 +433,25 @@ export const InvoicesPage: React.FC = () => {
           <div className="flex justify-end space-x-3 pt-4 border-t border-gray-200">
             <button
               type="button"
+              disabled={generatingInvoice}
               onClick={() => setIsModalOpen(false)}
-              className="px-4 py-2 border border-gray-300 rounded-lg text-xs font-semibold text-gray-700 hover:bg-gray-50"
+              className="px-4 py-2 border border-gray-300 rounded-lg text-xs font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-50"
             >
               Cancel
             </button>
             <button
               type="submit"
-              className="px-5 py-2 bg-brand-600 hover:bg-brand-700 text-white rounded-lg text-xs font-bold shadow-md shadow-brand-600/30"
+              disabled={generatingInvoice}
+              className="px-5 py-2 bg-brand-600 hover:bg-brand-700 text-white rounded-lg text-xs font-bold shadow-md shadow-brand-600/30 disabled:opacity-50 inline-flex items-center gap-2"
             >
-              Generate Invoice
+              {generatingInvoice ? (
+                <>
+                  <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                  <span>Calculating...</span>
+                </>
+              ) : (
+                <span>Generate Invoice</span>
+              )}
             </button>
           </div>
         </form>

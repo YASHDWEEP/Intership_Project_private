@@ -16,8 +16,10 @@ import {
   Plus,
 } from 'lucide-react';
 import api from '../services/api';
+import { useAuth } from '../context/AuthContext';
 
 export const EmailCenterPage: React.FC = () => {
+  const { user } = useAuth();
   const [emails, setEmails] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [directionFilter, setDirectionFilter] = useState('ALL');
@@ -50,11 +52,15 @@ export const EmailCenterPage: React.FC = () => {
   const handleSimulateInbound = async () => {
     setSimulating(true);
     try {
+      const senderEmail = user?.email || 'rajesh.s@infosys.com';
+      const companyName = user?.clientName || 'Infosys Limited';
+      const senderName = user?.name || 'Rajesh Sharma';
+
       const res = await api.post('/emails/simulate-inbound', {
-        from: 'priya.s@tcs.com',
-        clientName: 'Tata Consultancy Services',
-        subject: 'Re: Tax Invoice Payment Confirmation & Route Clarification',
-        bodyHtml: `<p>Hi CabMitra Support Team,</p><p>We have processed payment for Invoice #INV-2026-0002 via corporate bank transfer. Please verify receipt and send the updated trip logs for our audit team.</p><p>Regards,<br><strong>Priya Sundaram</strong><br>TCS Transport Desk</p>`,
+        from: senderEmail,
+        clientName: companyName,
+        subject: `Re: Cab Operations Invoice & Route Query (${companyName})`,
+        bodyHtml: `<p>Hi CabMitra Support Team,</p><p>We have reviewed the August cab operations invoice. Could you please share the detailed trip logs and vehicle route breakdown for our Whitefield pickup routes?</p><p>Regards,<br><strong>${senderName}</strong><br>${companyName} Transport Desk</p>`,
       });
       fetchEmails();
       setSelectedEmail(res.data);
@@ -64,6 +70,7 @@ export const EmailCenterPage: React.FC = () => {
       setSimulating(false);
     }
   };
+
 
   return (
     <div className="p-8 space-y-6 max-w-[1600px] mx-auto">

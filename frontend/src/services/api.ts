@@ -1,18 +1,37 @@
 import axios from 'axios';
 
+const getBaseUrl = () => {
+  const envUrl = (import.meta as any).env?.VITE_API_BASE_URL;
+  if (envUrl) return envUrl;
+  if (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
+    return 'http://localhost:5000/api';
+  }
+  return 'https://cabmitra-backend.onrender.com/api';
+};
+
 const api = axios.create({
-  baseURL: (import.meta as any).env?.VITE_API_BASE_URL || 'https://cabmitra-backend.onrender.com/api',
-  timeout: 120000, // 120s timeout for Render free tier cold starts & DB transactions
+  baseURL: getBaseUrl(),
+  timeout: 60000,
   headers: {
     'Content-Type': 'application/json',
   },
 });
 
+// Short-lived memory cache for GET lookup requests to speed up UI tab switching
+const apiCache = new Map<string, { data: any; timestamp: number }>();
+const CACHE_TTL_MS = 15000; // 15s cache TTL for repeated GET navigation
+
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('cabmitra_token');
+  const token = sessionStorage.getItem('cabmitra_token') || localStorage.getItem('cabmitra_token');
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
+
+  // Clear cache on mutating operations (POST, PUT, DELETE, PATCH)
+  if (config.method && config.method.toUpperCase() !== 'GET') {
+    apiCache.clear();
+  }
+
   return config;
 });
 
@@ -50,6 +69,8 @@ api.interceptors.response.use(
 
     // Standard 401 Unauthorized handling
     if (error.response && error.response.status === 401) {
+      sessionStorage.removeItem('cabmitra_token');
+      sessionStorage.removeItem('cabmitra_user');
       localStorage.removeItem('cabmitra_token');
       localStorage.removeItem('cabmitra_user');
       if (window.location.pathname !== '/login') {
