@@ -85,7 +85,7 @@ export class RolesController {
         countMap[uc.role] = uc._count.id;
       });
 
-      const enriched = roles.map((r) => ({
+      const enriched = roles.map((r: any) => ({
         ...r,
         userCount: countMap[r.name] || 0,
       }));

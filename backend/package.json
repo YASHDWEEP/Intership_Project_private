@@ -4,7 +4,7 @@
   "description": "CABMITRA Backend Service - Cab Operations, Billing & Vendor Settlement Management Platform",
   "main": "dist/server.js",
   "scripts": {
-    "build": "tsc",
+    "build": "prisma generate && tsc",
     "start": "node dist/server.js",
     "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
     "prisma:generate": "prisma generate",

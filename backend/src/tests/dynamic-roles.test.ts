@@ -8,7 +8,7 @@ async function testDynamicRolesSystem() {
     // 1. Verify Role Table catalog seeding
     console.log('1. Verifying Role database table...');
     const roles = await prisma.role.findMany();
-    console.log(`✓ Found ${roles.length} roles in database catalog:`, roles.map((r) => r.name));
+    console.log(`✓ Found ${roles.length} roles in database catalog:`, roles.map((r: any) => r.name));
 
     // 2. Test Dynamic Creation of new Roles (EMPLOYEE, MANAGER, AUDITOR)
     console.log('\n2. Testing creation of dynamic new roles (EMPLOYEE, MANAGER, AUDITOR)...');
