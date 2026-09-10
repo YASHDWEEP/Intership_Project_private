@@ -1,4 +1,5 @@
 import { prisma } from '../config/prisma';
+import { roundMoney, addMoney, subtractMoney, multiplyMoney } from '../common/utils/money.util';
 
 export interface PricingCalculationResult {
   kmSlab: string;
@@ -51,36 +52,36 @@ export class PricingEngine {
 
       if (matchedSlab) {
         kmSlab = `${matchedSlab.minKm}-${matchedSlab.maxKm} KM`;
-        tripRate = matchedSlab.rate;
-        vendorCostRate = matchedSlab.vendorRate > 0 ? matchedSlab.vendorRate : Math.round(matchedSlab.rate * 0.8);
+        tripRate = roundMoney(matchedSlab.rate);
+        vendorCostRate = matchedSlab.vendorRate > 0 ? roundMoney(matchedSlab.vendorRate) : roundMoney(matchedSlab.rate * 0.8);
       } else {
         // Fallback to highest slab or proportional calculation
         const sortedSlabs = [...pricingRule.slabs].sort((a, b) => b.maxKm - a.maxKm);
         const highestSlab = sortedSlabs[0];
         kmSlab = `>${highestSlab.minKm} KM (Extended)`;
-        tripRate = highestSlab.rate + (totalKm - highestSlab.minKm) * 15;
-        vendorCostRate = Math.round(tripRate * 0.8);
+        tripRate = roundMoney(highestSlab.rate + (totalKm - highestSlab.minKm) * 15);
+        vendorCostRate = roundMoney(tripRate * 0.8);
       }
     } else {
       // System Default Fallback Slabs if client has no specific rule configured
       if (totalKm <= 15) {
         kmSlab = '0-15 KM';
         tripRate = vehicleType === 'EV' ? 550 : vehicleType === '6 Seater' ? 700 : 500;
-        vendorCostRate = Math.round(tripRate * 0.8);
+        vendorCostRate = roundMoney(tripRate * 0.8);
       } else if (totalKm <= 25) {
         kmSlab = '16-25 KM';
         tripRate = vehicleType === 'EV' ? 750 : vehicleType === '6 Seater' ? 950 : 700;
-        vendorCostRate = Math.round(tripRate * 0.8);
+        vendorCostRate = roundMoney(tripRate * 0.8);
       } else if (totalKm <= 40) {
         kmSlab = '26-40 KM';
         tripRate = vehicleType === 'EV' ? 950 : vehicleType === '6 Seater' ? 1200 : 900;
-        vendorCostRate = Math.round(tripRate * 0.8);
+        vendorCostRate = roundMoney(tripRate * 0.8);
       } else {
         kmSlab = '40+ KM';
         const extraKm = totalKm - 40;
         const baseRate = vehicleType === '6 Seater' ? 1200 : 900;
-        tripRate = baseRate + extraKm * 18;
-        vendorCostRate = Math.round(tripRate * 0.8);
+        tripRate = roundMoney(baseRate + extraKm * 18);
+        vendorCostRate = roundMoney(tripRate * 0.8);
       }
     }
 
@@ -88,16 +89,18 @@ export class PricingEngine {
     let vendorCost = vendorCostRate;
 
     if (pricingType === 'PER_KM') {
-      tripRevenue = totalKm * tripRate;
-      vendorCost = totalKm * vendorCostRate;
+      tripRevenue = multiplyMoney(totalKm, tripRate);
+      vendorCost = multiplyMoney(totalKm, vendorCostRate);
     }
 
-    // Add extra charges to revenue and cost
-    const waitingCharge = waitingTime * 100; // Rs 100 / hr
-    tripRevenue += waitingCharge + tollAmount + parkingAmount;
-    vendorCost += waitingCharge + tollAmount + parkingAmount;
+    // Add extra charges to revenue and cost safely
+    const waitingCharge = roundMoney(waitingTime * 100); // Rs 100 / hr
+    const extraCharges = addMoney(waitingCharge, tollAmount, parkingAmount);
 
-    const margin = tripRevenue - vendorCost;
+    tripRevenue = addMoney(tripRevenue, extraCharges);
+    vendorCost = addMoney(vendorCost, extraCharges);
+
+    const margin = subtractMoney(tripRevenue, vendorCost);
 
     const breakdown = `Slab: ${kmSlab} | Rate: ₹${tripRate} | Base Rev: ₹${tripRevenue} | Vendor Cost: ₹${vendorCost} | Margin: ₹${margin} (Toll: ₹${tollAmount}, Waiting: ₹${waitingCharge})`;
 

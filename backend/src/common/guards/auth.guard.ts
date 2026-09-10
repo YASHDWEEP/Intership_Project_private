@@ -12,6 +12,17 @@ export interface AuthRequest extends Request {
   };
 }
 
+export const getJwtSecret = (): string => {
+  const secret = process.env.JWT_SECRET;
+  if (!secret) {
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error('CRITICAL SECURITY ERROR: JWT_SECRET environment variable is missing in production!');
+    }
+    return 'cabmitra_super_secret_jwt_key_2026';
+  }
+  return secret;
+};
+
 export const authGuard = (allowedRoles: string[] = []) => {
   return (req: AuthRequest, res: Response, next: NextFunction) => {
     const authHeader = req.headers.authorization;
@@ -27,7 +38,7 @@ export const authGuard = (allowedRoles: string[] = []) => {
       return res.status(401).json({ error: 'Unauthorized: Missing or invalid token format' });
     }
     try {
-      const secret = process.env.JWT_SECRET || 'cabmitra_super_secret_jwt_key_2026';
+      const secret = getJwtSecret();
       const decoded = jwt.verify(token, secret) as any;
       req.user = decoded;
 
@@ -41,3 +52,4 @@ export const authGuard = (allowedRoles: string[] = []) => {
     }
   };
 };
+

@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { prisma } from '../config/prisma';
+import { getJwtSecret } from '../common/guards/auth.guard';
 
 export class AuthController {
   static async login(req: Request, res: Response) {
@@ -20,12 +21,12 @@ export class AuthController {
       });
 
       if (!user) {
-        return res.status(401).json({ error: 'Invalid credentials. User not found.' });
+        return res.status(401).json({ error: 'Invalid email or password.' });
       }
 
       const isPasswordValid = await bcrypt.compare(password, user.passwordHash);
       if (!isPasswordValid) {
-        return res.status(401).json({ error: 'Invalid credentials. Password incorrect.' });
+        return res.status(401).json({ error: 'Invalid email or password.' });
       }
 
       if (user.status !== 'ACTIVE') {
@@ -41,7 +42,7 @@ export class AuthController {
         vendorId: user.vendorId,
       };
 
-      const secret = process.env.JWT_SECRET || 'cabmitra_super_secret_jwt_key_2026';
+      const secret = getJwtSecret();
       const token = jwt.sign(tokenPayload, secret, { expiresIn: '7d' });
 
       return res.json({

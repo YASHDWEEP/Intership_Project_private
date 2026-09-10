@@ -31,7 +31,7 @@ const DEFAULT_SYSTEM_ROLES = [
     name: 'CLIENT',
     description: 'Corporate Client Portal user viewing trip history, client billing tax invoices, payments, and reports',
     isSystem: true,
-    permissions: ['dashboard', 'invoices', 'payments', 'reports', 'email-center'],
+    permissions: ['dashboard', 'trips', 'trips.read', 'invoices', 'invoices.read', 'payments', 'reports', 'reports.read', 'email-center'],
   },
   {
     name: 'EMPLOYEE',
@@ -49,20 +49,19 @@ const DEFAULT_SYSTEM_ROLES = [
 
 export class RolesController {
   private static async seedDefaultRolesIfNeeded() {
-    const count = await prisma.role.count();
-    if (count === 0) {
-      for (const r of DEFAULT_SYSTEM_ROLES) {
-        await prisma.role.upsert({
-          where: { name: r.name },
-          update: {},
-          create: {
-            name: r.name,
-            description: r.description,
-            isSystem: r.isSystem,
-            permissions: r.permissions,
-          },
-        });
-      }
+    for (const r of DEFAULT_SYSTEM_ROLES) {
+      await prisma.role.upsert({
+        where: { name: r.name },
+        update: {
+          permissions: r.permissions,
+        },
+        create: {
+          name: r.name,
+          description: r.description,
+          isSystem: r.isSystem,
+          permissions: r.permissions,
+        },
+      });
     }
   }
 

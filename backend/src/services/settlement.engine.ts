@@ -1,5 +1,6 @@
 import { prisma } from '../config/prisma';
 import { EmailService } from './email.service';
+import { roundMoney, addMoney, subtractMoney, calculateCommission } from '../common/utils/money.util';
 
 export interface SettlementCalculationParams {
   vendorId: string;
@@ -41,10 +42,10 @@ export class SettlementEngine {
       payableAmount: number;
     }> = [];
 
-    // Calculate gross trip earnings for vendor
+    // Calculate gross trip earnings for vendor safely
     trips.forEach((trip) => {
-      const tripAmount = trip.vendorCost;
-      grossAmount += tripAmount;
+      const tripAmount = roundMoney(trip.vendorCost);
+      grossAmount = addMoney(grossAmount, tripAmount);
 
       items.push({
         tripId: trip.id,
@@ -55,16 +56,16 @@ export class SettlementEngine {
       });
     });
 
-    // Calculate deductions
+    // Calculate deductions safely
     let totalDeductions = 0;
     deductionsList.forEach((d) => {
-      totalDeductions += d.amount;
+      totalDeductions = addMoney(totalDeductions, roundMoney(d.amount));
     });
 
     // Optional platform commission check
     if (vendor.commissionType === 'PERCENTAGE' && vendor.commissionValue > 0) {
-      const commissionFee = (grossAmount * vendor.commissionValue) / 100;
-      totalDeductions += commissionFee;
+      const commissionFee = calculateCommission(grossAmount, vendor.commissionValue);
+      totalDeductions = addMoney(totalDeductions, commissionFee);
       deductionsList.push({
         type: 'SERVICE_CHARGE',
         amount: commissionFee,
@@ -72,7 +73,7 @@ export class SettlementEngine {
       });
     }
 
-    const netPayable = Math.max(0, grossAmount - totalDeductions);
+    const netPayable = Math.max(0, subtractMoney(grossAmount, totalDeductions));
 
     return {
       vendor,

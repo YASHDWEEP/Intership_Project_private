@@ -75,6 +75,18 @@ async function runTests() {
 
   try {
 
+    // Seed system default roles in DB catalog so permissions like 'trips' exist for CLIENT role
+    await prisma.role.upsert({
+      where: { name: 'CLIENT' },
+      update: { permissions: ['dashboard', 'trips', 'trips.read', 'invoices', 'invoices.read', 'payments', 'reports', 'email-center'] },
+      create: {
+        name: 'CLIENT',
+        description: 'Corporate Client Portal user',
+        isSystem: true,
+        permissions: ['dashboard', 'trips', 'trips.read', 'invoices', 'invoices.read', 'payments', 'reports', 'email-center'],
+      },
+    });
+
     // Setup test data in DB
     const pwdHash = '$2a$10$76d29H3F8r6f5r8h9s1u2e3i4o5p6a7b8c9d0e1f2g3h4i5j6k';
 
@@ -223,8 +235,8 @@ async function runTests() {
     // Scenario 1: Infosys logs in -> can access Infosys data
     const res1 = await request('GET', '/api/trips', infosysToken);
     const infosysTrips = res1.body.data || [];
-    const onlyInfosysData = res1.status === 200 && infosysTrips.every((t: any) => t.clientId === infosysClient.id);
-    assertTest(onlyInfosysData, '1. Infosys logs in -> can access Infosys data only');
+    const onlyInfosysData = res1.status === 200 && infosysTrips.length > 0 && infosysTrips.every((t: any) => t.clientId === infosysClient.id);
+    assertTest(onlyInfosysData, '1. Infosys logs in -> can access Infosys data only', `Status: ${res1.status}, Count: ${infosysTrips.length}, ClientIds: ${infosysTrips.map((t: any) => t.clientId).join(',')}`);
 
     // Scenario 2: Infosys logs in -> cannot access Company B (Wipro) data
     const res2 = await request('GET', `/api/trips?clientId=${wiproClient.id}`, infosysToken);

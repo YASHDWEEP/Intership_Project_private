@@ -1,13 +1,36 @@
 import express from 'express';
 import cors from 'cors';
+import helmet from 'helmet';
 import dotenv from 'dotenv';
 import apiRoutes from './routes/api.routes';
+import { apiLimiter } from './common/middleware/rateLimiter';
 
 dotenv.config();
 
 const app = express();
 
-app.use(cors());
+app.use(helmet({
+  contentSecurityPolicy: false, // Disable default restrictive CSP for cross-origin PDF viewing & iframe embedding
+  crossOriginResourcePolicy: { policy: 'cross-origin' }
+}));
+
+const allowedOrigins = process.env.ALLOWED_ORIGINS
+  ? process.env.ALLOWED_ORIGINS.split(',').map((s) => s.trim())
+  : ['http://localhost:5173', 'http://localhost:3000', 'http://127.0.0.1:5173'];
+
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.includes(origin) || process.env.NODE_ENV !== 'production') {
+      callback(null, true);
+    } else {
+      callback(new Error('Blocked by CORS policy'));
+    }
+  },
+  credentials: true,
+}));
+
+app.use('/api', apiLimiter);
+
 app.use(
   express.json({
     limit: '20mb',

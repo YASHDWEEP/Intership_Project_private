@@ -327,9 +327,31 @@ export class InvoicesController {
 
       if (!validateTenantAccess(req, res, invoice.clientId)) return;
 
+      const currentStatus = invoice.status;
+      const targetStatus = String(status).toUpperCase();
+
+      // State Transition Matrix Validation
+      const allowedTransitions: Record<string, string[]> = {
+        DRAFT: ['GENERATED', 'SENT', 'CANCELLED'],
+        GENERATED: ['SENT', 'PENDING', 'PAID', 'CANCELLED'],
+        SENT: ['PENDING', 'PAID', 'FAILED', 'CANCELLED'],
+        PENDING: ['PAID', 'FAILED', 'CANCELLED'],
+        FAILED: ['PENDING', 'CANCELLED'],
+        PAID: ['REFUNDED'],
+        CANCELLED: [],
+        REFUNDED: [],
+      };
+
+      const validNextStates = allowedTransitions[currentStatus] || [];
+      if (!validNextStates.includes(targetStatus) && currentStatus !== targetStatus) {
+        return res.status(400).json({
+          error: `Invalid status transition from '${currentStatus}' to '${targetStatus}'. Allowed transitions: [${validNextStates.join(', ')}]`,
+        });
+      }
+
       const updated = await prisma.invoice.update({
         where: { id },
-        data: { status },
+        data: { status: targetStatus },
       });
 
       await logAudit({
@@ -337,10 +359,10 @@ export class InvoicesController {
         action: 'UPDATE_STATUS',
         entity: 'Invoice',
         entityId: id,
-        newValue: { status },
+        newValue: { status: targetStatus, previousStatus: currentStatus },
       });
 
-      if (status === 'PAID') {
+      if (targetStatus === 'PAID') {
         // Asynchronously trigger automated payment receipt email to client
         EmailService.sendInvoicePaymentReceipt(id).catch((err) => {
           console.error('Failed to send payment receipt email:', err);
