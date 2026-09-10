@@ -46,7 +46,7 @@ api.interceptors.response.use(
       config._retryCount = config._retryCount || 0;
     }
 
-    const MAX_RETRIES = 4;
+    const MAX_RETRIES = 5;
     const responseStatus = error.response?.status;
     const isRetryableError =
       !error.response || // Network connection drop / Server sleeping
@@ -60,7 +60,7 @@ api.interceptors.response.use(
 
     if (config && isRetryableError && config._retryCount < MAX_RETRIES) {
       config._retryCount += 1;
-      const delayMs = config._retryCount * 2000; // 2s, 4s, 6s, 8s
+      const delayMs = config._retryCount * 2500; // 2.5s, 5s, 7.5s, 10s, 12.5s
       console.warn(`⏳ Server warming up / network retry ${config._retryCount}/${MAX_RETRIES} in ${delayMs}ms...`);
       
       await new Promise((resolve) => setTimeout(resolve, delayMs));
@@ -82,7 +82,7 @@ api.interceptors.response.use(
     if (!error.response) {
       error.response = {
         data: {
-          error: 'CabMitra backend server is reconnecting. Please try your request again in a few seconds.',
+          error: 'CabMitra cloud backend server is warming up. Please click Sign In again in a few seconds.',
         },
       };
     }
