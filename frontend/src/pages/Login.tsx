@@ -4,8 +4,8 @@ import { ArrowRight, ShieldCheck, Car, Building2, Users, Mail, Lock, Sparkles, C
 import { useAuth } from '../context/AuthContext';
 
 export const Login: React.FC = () => {
-  const [email, setEmail] = useState('admin@cabmitra.com');
-  const [password, setPassword] = useState('Password@123');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const { login, loading } = useAuth();
   const navigate = useNavigate();

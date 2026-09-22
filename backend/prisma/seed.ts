@@ -28,7 +28,7 @@ async function main() {
     console.warn('Cleanup warning:', err);
   }
 
-  const passwordHash = '$2a$10$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeg6Lruj3vjPGga31lW';
+  const passwordHash = await bcrypt.hash('admin123', 10);
 
   // 1. Create Clients
   const clientsData = [

@@ -10,6 +10,7 @@
     "test": "ts-node src/tests/security-matrix.test.ts && ts-node src/tests/tenant-isolation.test.ts && ts-node src/tests/dynamic-roles.test.ts",
     "prisma:generate": "prisma generate",
     "prisma:push": "prisma db push",
+    "seed": "ts-node prisma/seed.ts",
     "prisma:seed": "ts-node prisma/seed.ts"
   },
   "prisma": {
